@@ -10,6 +10,11 @@ description = "Sample UEFI components for the DXE Core."
 [dependencies]
 log = { workspace = true }
 patina = { workspace = true }
+patina_uefi_services = { workspace = true }
+r-efi = { workspace = true }
+
+[dev-dependencies]
+patina_uefi_services = { workspace = true, features = ["mockall"] }
 
 [features]
 std = []

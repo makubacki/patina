@@ -28,7 +28,7 @@ pub struct StandardConsoleServices {
 }
 
 impl StandardConsoleServices {
-    /// Creates a new `StandardConsoleServices`` instance.
+    /// Creates a new `StandardConsoleServices` instance.
     ///
     /// # Arguments
     ///
