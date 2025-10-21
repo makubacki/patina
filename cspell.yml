@@ -108,6 +108,7 @@ words:
   - mpidr
   - msdia
   - mtrrs
+  - nanos
   - nestedfv
   - nocapture
   - nologo

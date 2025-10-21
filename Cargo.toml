@@ -45,6 +45,7 @@ patina_mtrr = { version = "1.0.0" }
 patina_paging = { version = "^9.0.3" }
 patina_performance = { version = "12.1.0", path = "components/patina_performance" }
 patina_stacktrace = { version = "12.1.0", path = "core/patina_stacktrace" }
+patina_uefi_services = { path = "components/patina_uefi_services" }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 r-efi = { version = "5.0.0", default-features = false }

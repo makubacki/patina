@@ -1,0 +1,24 @@
+[package]
+name = "patina_uefi_services"
+resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "UEFI Services abstraction for Patina components"
+
+[dependencies]
+patina = { workspace = true }
+patina_macro = { workspace = true }
+r-efi = { workspace = true }
+zerocopy = { workspace = true, features = ["alloc", "derive"] }
+mockall = { workspace = true, optional = true }
+spin = { workspace = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+
+[features]
+default = []
+std = ["patina/std"]
+mockall = ["dep:mockall", "std", "patina/mockall"]
