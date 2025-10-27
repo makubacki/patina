@@ -18,9 +18,9 @@ on:
 
 jobs:
   check-rust-version:
-      permissions:
-        pull-requests: write
-        contents: read
-
-      uses: OpenDevicePartnership/patina-devops/.github/workflows/RustVersionCheck.yml@v0.0.2
-      secrets: inherit
+    permissions:
+      pull-requests: write
+      issues: write
+      contents: read
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/RustVersionCheck.yml@v0.0.2
+    secrets: inherit
