@@ -25,7 +25,7 @@ on:
 jobs:
   ci_workflow:
     name: Run
-    uses: makubacki/patina-devops/.github/workflows/CiWorkflow.yml@personal/mikuback/use_caller_provided_auth_token
+    uses: makubacki/patina-devops/.github/workflows/CiWorkflow.yml@switch_some_workflows_to_gh_app
     with:
       build-tasks: "build,build-x64,build-aarch64"
       mdbook-path: "docs"

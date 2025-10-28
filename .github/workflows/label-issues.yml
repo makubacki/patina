@@ -31,5 +31,5 @@ jobs:
       contents: read
       pull-requests: write
 
-    uses: makubacki/patina-devops/.github/workflows/Labeler.yml@personal/mikuback/use_caller_provided_auth_token
+    uses: makubacki/patina-devops/.github/workflows/Labeler.yml@switch_some_workflows_to_gh_app
     secrets: inherit

@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🛠️ Download Rust Tools 🛠️
-        uses: makubacki/patina-devops/.github/actions/rust-tool-cache@personal/mikuback/use_caller_provided_auth_token
+        uses: makubacki/patina-devops/.github/actions/rust-tool-cache@switch_some_workflows_to_gh_app
 
       - name: 📄 Build Documentation 📄
         run: mdbook build docs
