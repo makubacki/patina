@@ -17,5 +17,5 @@ jobs:
       contents: read
       issues: write
 
-    uses: makubacki/patina-devops/.github/workflows/IssueTriager.yml@personal/mikuback/use_caller_provided_auth_token
+    uses: makubacki/patina-devops/.github/workflows/IssueTriager.yml@switch_some_workflows_to_gh_app_test
     secrets: inherit

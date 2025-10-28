@@ -25,5 +25,5 @@ jobs:
       contents: write
       pull-requests: write
 
-    uses: makubacki/patina-devops/.github/workflows/UpdateReleaseDraft.yml@personal/mikuback/use_caller_provided_auth_token
+    uses: makubacki/patina-devops/.github/workflows/UpdateReleaseDraft.yml@switch_some_workflows_to_gh_app_test
     secrets: inherit

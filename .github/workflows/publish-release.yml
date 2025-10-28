@@ -16,7 +16,7 @@ on:
 jobs:
   release:
     name: Release
-    uses: makubacki/patina-devops/.github/workflows/ReleaseWorkflow.yml@personal/mikuback/use_caller_provided_auth_token
+    uses: makubacki/patina-devops/.github/workflows/ReleaseWorkflow.yml@switch_some_workflows_to_gh_app_test
     with:
       ignore-prefix: 'patina-v'
     secrets: inherit
