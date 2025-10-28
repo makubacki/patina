@@ -31,5 +31,5 @@ jobs:
       contents: read
       pull-requests: write
 
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/Labeler.yml@v0.0.2
+    uses: makubacki/patina-devops/.github/workflows/Labeler.yml@personal/mikuback/use_caller_provided_auth_token
     secrets: inherit

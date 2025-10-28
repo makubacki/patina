@@ -22,5 +22,5 @@ jobs:
     permissions:
       issues: write
 
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/LabelSyncer.yml@v0.0.2
+    uses: makubacki/patina-devops/.github/workflows/LabelSyncer.yml@personal/mikuback/use_caller_provided_auth_token
     secrets: inherit
