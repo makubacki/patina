@@ -62,10 +62,6 @@
   - [Testing](dxe_core/testing.md)
   - [UEFI Driver Model](dxe_core/driver_model.md)
 
-# Component Documentation
-
-- [Performance Analysis](components/patina_performance.md)
-
 -----------
 - [Contributors](misc/contributors.md)
 - [License](misc/license_history.md)

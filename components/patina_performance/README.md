@@ -1,10 +1,28 @@
-# Patina Performance
+# Patina Performance Component
 
-The Patina performance component is a native Rust implementation for managing firmware performance data.
+The Patina performance component maintains the infrastructure to report firmware performance information.
+
+## Responsibilities
+
+- Initialize the FBPT and seed it with any measurements passed in performance data HOBs from prior boot phases.
+- Track the current performance measurement mask and load-image count so event producers can filter their output.
+- Publish performance properties through a configuration table and expose the measurement protocol
+  (`EdkiiPerformanceMeasurement`) for C drivers that need to log performance data.
+- Optionally merge Management Mode (MM) performance records when an MM communication region is available.
+- Publish the FBPT so the operating system can consume it later.
+
+## Configuration
+
+- `PerfConfig.enable_component` must be set to enable the component.
+- `PerfConfig.enabled_measurements` carries the bitmask of `patina::performance::Measurement` values that should be
+  recorded.
+- Platforms that need runtime configuration can include the `PerformanceConfigurationProvider` component, which reads a
+  `PerformanceConfigHob` and locks the `PerfConfig` values for the session.
 
 ## Enabling Performance Measurements
 
-Enabling performance in Patina is done by adding the `Performance` component to the Patina DXE Core build.
+Enabling performance in Patina is done by adding the `Performance` component to the
+[Patina DXE Core](https://crates.io/crates/patina_dxe_core) build.
 
 ```rust
 // ...
@@ -144,12 +162,3 @@ Upon initialization, the component performs the following steps:
 
 This component **only publishes the FBPT**, as it specifically manages the additional record fields within it.
 Other tables, such as the **Firmware Performance Data Table (FPDT)**, are published by separate components.
-
-## References
-
-[**ACPI: Firmware Performance Data Table**](https://uefi.org/htmlspecs/ACPI_Spec_6_4_html/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html?highlight=fbpt#firmware-performance-data-table-fpdt)
-
-**Performance source code in the EDK II repository.**
-
-- <https://github.com/tianocore/edk2/blob/master/MdePkg/Include/Library/PerformanceLib.h>
-- <https://github.com/tianocore/edk2/blob/master/MdeModulePkg/Library/DxeCorePerformanceLib/DxeCorePerformanceLib.c>
