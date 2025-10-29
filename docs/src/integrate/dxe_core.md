@@ -612,7 +612,7 @@ Add the EFI binary to your platform FDF file:
 
 1. **Build failures**: Ensure all dependencies are properly specified and the rust toolchain version matches
 2. **Runtime issues**: Check logger configuration and UART base address for your platform. For detailed debugging
-   techniques, see [Patina Dev Debugging](../dev/debugging.md)
+   techniques, see the [`patina_debugging` README](https://github.com/OpenDevicePartnership/patina/tree/main/core/patina_debugger/README.md)
 3. **Memory issues**: Use 32-bit memory compatibility settings if DXE code usd on the platform does not properly
    handle addresses >4GB. Review [DXE Core Memory Management](../dxe_core/memory_management.md)
 
