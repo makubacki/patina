@@ -34,7 +34,11 @@ impl<'a, R: CPtr<'a, Type = T>, T> PtrMetadata<'a, R> {
     ///
     /// # Safety
     /// Caller must ensure that the pointed-to memory is still valid and uphold rust pointer invariants (e.g. no aliasing)
+    ///
+    /// # Panics
+    /// Panics if the stored pointer value is null
     pub unsafe fn into_original_ptr(self) -> R {
+        assert_ne!(self.ptr_value, ptr::null::<T>() as usize, "Cannot reconstruct pointer from a null pointer value");
         unsafe { mem::transmute_copy(&self.ptr_value) }
     }
 }
