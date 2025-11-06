@@ -1,4 +1,3 @@
-
 # Introduction
 
 **Welcome to Patina** - a pure Rust project dedicated to evolving and modernizing UEFI firmware with a strong focus on
@@ -22,7 +21,8 @@ into these 5 categories:
 5. Development guidance and standards that apply to both Patina and Patina component developers.
 
 If you have not read this book before, we suggest you start with **(1) [Patina Background](patina.md)**, which outlines
-the project's goals and design philosophy.
+the project's goals and design philosophy. You can also watch an overview of
+[Patina presented at UEFI Plugfest 2025](#patina-overview-at-uefi-plugfest-2025).
 
 ## Important Crates and Repositories
 
@@ -113,3 +113,15 @@ start of the different sections mentioned above:
 3. [Component Development](component/getting_started.md)
 4. [Contributing to Patina](todo!())
 5. [Developer Guides](dev/documenting.md)
+
+## Patina Overview at UEFI Plugfest 2025
+
+<div style="text-align: center; margin: 20px 0;">
+  <iframe width="853" height="480"
+    src="https://www.youtube.com/embed/iKzHrhpCgUI"
+    title="YouTube: Patina at UEFI Plugfest 2025"
+    frameborder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowfullscreen>
+  </iframe>
+</div>
