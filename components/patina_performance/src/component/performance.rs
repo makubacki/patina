@@ -174,7 +174,7 @@ mod tests {
     use super::*;
 
     use alloc::rc::Rc;
-    use core::{assert_eq, ptr};
+    use core::assert_eq;
     use r_efi::efi;
 
     use patina::{
@@ -279,11 +279,17 @@ mod tests {
         let mut fbpt = MockFirmwareBasicBootPerfTable::new();
         fbpt.expect_set_perf_records().once().return_const(());
 
-        let fbpt = TplMutex::new(unsafe { &*ptr::addr_of!(boot_services) }, Tpl::NOTIFY, fbpt);
-        let fbpt = unsafe { &*ptr::addr_of!(fbpt) };
+        let boot_services_rc = Rc::new(boot_services);
+
+        // Leak a reference to boot_services to create a 'static reference for TplMutex.
+        let boot_services_static = Box::leak(Box::new(Rc::clone(&boot_services_rc)));
+        let fbpt = TplMutex::new(&**boot_services_static, Tpl::NOTIFY, fbpt);
+
+        // Leak the fbpt to create a 'static reference for testing.
+        let fbpt = Box::leak(Box::new(fbpt));
 
         let _ = Performance._entry_point(
-            Rc::new(boot_services),
+            boot_services_rc,
             Rc::new(runtime_services),
             Some(hob_perf_data_extractor),
             Some(mm_comm_region),
