@@ -18,7 +18,7 @@ use tpl_mutex::TplMutex;
 use crate::{
     allocator::core_allocate_pool,
     driver_services::{core_connect_controller, core_disconnect_controller},
-    events::{EVENT_DB, signal_event},
+    events::{EVENT_DB, raise_tpl, restore_tpl, signal_event},
     protocol_db::{DXE_CORE_HANDLE, SpinLockedProtocolDb},
     tpl_mutex,
 };
@@ -89,6 +89,8 @@ pub fn core_uninstall_protocol_interface(
         }
     };
 
+    let old_tpl = raise_tpl(efi::TPL_NOTIFY);
+
     //attempt to close all OPEN_BY_DRIVER usages.
     let mut usage_close_status = Ok(());
     loop {
@@ -96,7 +98,10 @@ pub fn core_uninstall_protocol_interface(
         let usages = match PROTOCOL_DB.get_open_protocol_information_by_protocol(handle, protocol) {
             Ok(usages) => usages,
             Err(EfiError::NotFound) => Vec::new(),
-            Err(err) => return Err(err),
+            Err(err) => {
+                restore_tpl(old_tpl);
+                return Err(err);
+            }
         };
 
         for usage in usages {
@@ -123,7 +128,10 @@ pub fn core_uninstall_protocol_interface(
         let usages = match PROTOCOL_DB.get_open_protocol_information_by_protocol(handle, protocol) {
             Ok(usages) => usages,
             Err(EfiError::NotFound) => Vec::new(),
-            Err(err) => return Err(err),
+            Err(err) => {
+                restore_tpl(old_tpl);
+                return Err(err);
+            }
         };
 
         for usage in usages {
@@ -150,11 +158,14 @@ pub fn core_uninstall_protocol_interface(
     }
 
     if usage_close_status.is_err() || unclosed_usages {
+        restore_tpl(old_tpl);
         unsafe {
             let _result = core_connect_controller(handle, Vec::new(), None, true);
         }
         return Err(EfiError::AccessDenied);
     }
+
+    restore_tpl(old_tpl);
 
     PROTOCOL_DB.uninstall_protocol_interface(handle, protocol, interface)
 }
