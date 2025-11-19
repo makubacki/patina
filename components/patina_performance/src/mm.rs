@@ -7,7 +7,8 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use r_efi::efi;
-use zerocopy::{FromBytes, Immutable, IntoBytes, LittleEndian, U64};
+use zerocopy::{IntoBytes, LittleEndian, U64};
+use zerocopy_derive::*;
 
 /// Errors that may occur when parsing MM structures.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -20,7 +20,7 @@ mu_rust_helpers = { workspace = true }
 patina = { workspace = true }
 patina_internal_device_path = { workspace = true }
 patina_mm = { workspace = true }
-zerocopy = { workspace = true, features = ["derive"] }
+zerocopy = { workspace = true }
 zerocopy-derive = { workspace = true }
 
 [dev-dependencies]

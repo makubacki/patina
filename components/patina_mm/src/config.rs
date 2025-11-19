@@ -24,7 +24,7 @@ use core::{fmt, pin::Pin, ptr::NonNull};
 
 use patina::{Guid, base::UEFI_PAGE_MASK};
 use r_efi::efi;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy_derive::*;
 
 /// MM Communication Buffer Status
 ///

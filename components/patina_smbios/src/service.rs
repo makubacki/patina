@@ -14,7 +14,6 @@ extern crate alloc;
 use alloc::vec::Vec;
 use core::cell::Ref;
 use r_efi::efi::Handle;
-use zerocopy::IntoBytes;
 use zerocopy_derive::*;
 
 #[cfg(any(test, feature = "mockall"))]
