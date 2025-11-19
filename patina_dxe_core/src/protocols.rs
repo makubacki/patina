@@ -107,12 +107,14 @@ pub fn core_uninstall_protocol_interface(
         for usage in usages {
             if (usage.attributes & efi::OPEN_PROTOCOL_BY_DRIVER) != 0 {
                 debug_assert!(usage.agent_handle.is_some());
+                restore_tpl(old_tpl);
                 unsafe {
                     usage_close_status = core_disconnect_controller(handle, usage.agent_handle, None);
                     if usage_close_status.is_ok() {
                         item_found = true;
                     }
                 }
+                raise_tpl(efi::TPL_NOTIFY);
                 break;
             }
         }
