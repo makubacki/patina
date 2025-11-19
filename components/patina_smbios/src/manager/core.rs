@@ -24,7 +24,7 @@ use r_efi::{
     efi::{Handle, PhysicalAddress},
 };
 use zerocopy::{IntoBytes, Ref};
-use zerocopy_derive::{Immutable, IntoBytes as DeriveIntoBytes};
+use zerocopy_derive::*;
 
 use crate::{
     error::SmbiosError,
@@ -47,7 +47,7 @@ pub const SMBIOS_3_X_TABLE_GUID: efi::Guid =
 /// SMBIOS 3.0 entry point structure (64-bit)
 /// Per SMBIOS 3.0+ specification section 5.2.2
 #[repr(C, packed)]
-#[derive(Clone, Copy, DeriveIntoBytes, Immutable)]
+#[derive(Clone, Copy, IntoBytes, Immutable)]
 pub struct Smbios30EntryPoint {
     /// Anchor string "_SM3_" (0x00)
     pub anchor_string: [u8; 5],

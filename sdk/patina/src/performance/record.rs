@@ -15,7 +15,8 @@ use crate::{BinaryGuid, performance::error::Error, performance_debug_assert};
 use alloc::vec::Vec;
 use core::{fmt, fmt::Debug, mem};
 use scroll::Pread;
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, IntoBytes};
+use zerocopy_derive::*;
 
 /// Maximum size in byte that a performance record can have.
 pub const FPDT_MAX_PERF_RECORD_SIZE: usize = u8::MAX as usize;
