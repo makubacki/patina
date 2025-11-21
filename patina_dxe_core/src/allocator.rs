@@ -986,7 +986,7 @@ fn process_hob_allocations(hob_list: &HobList) {
 
         if (stack_address == 0) || (stack_length == 0) {
             log::error!("Stack base address {:#X} for len {:#X}", stack_address, stack_length);
-            debug_assert!(false);
+            panic!("Invalid stack configuration");
         } else {
             match GCD.get_memory_descriptor_for_address(stack_address) {
                 Ok(gcd_desc) => {
@@ -1030,7 +1030,7 @@ fn process_hob_allocations(hob_list: &HobList) {
             }
         }
     } else {
-        debug_assert!(false, "No stack hob found\n");
+        panic!("No stack hob found");
     }
 
     // now that we've processed HOBs, lets allocate page 0 because we are going to use it for null pointer detection
