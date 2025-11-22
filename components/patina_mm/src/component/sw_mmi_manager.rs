@@ -17,7 +17,7 @@ use crate::{
     service::platform_mm_control::PlatformMmControl,
 };
 use patina::component::{
-    IntoComponent,
+    IntoComponent, component_impl,
     params::{Commands, Config},
     service::{IntoService, Service},
 };
@@ -55,6 +55,7 @@ pub struct SwMmiManager {
     inner_config: MmCommunicationConfiguration,
 }
 
+#[component_impl]
 impl SwMmiManager {
     /// Create a new `SwMmiManager` instance.
     pub fn new() -> Self {

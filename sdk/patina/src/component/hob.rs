@@ -295,7 +295,7 @@ mod tests {
     use crate as patina;
     use crate::{
         Guid, OwnedGuid,
-        component::IntoComponent,
+        component::{IntoComponent, component_entry_point},
         error::{EfiError, Result},
     };
 
@@ -364,6 +364,7 @@ mod tests {
         #[entry_point(path = my_component)]
         struct MyComponent;
 
+        #[component_entry_point]
         fn my_component(_: MyComponent, hob: Hob<MyStruct>) -> Result<()> {
             if hob.unused == 0 {
                 return Err(EfiError::NotReady);

@@ -37,6 +37,15 @@ expects that a `Self::entry_point(self, ...) -> patina::error::Result<()> { ... 
 function definition can be any number of parameters that support dependency injection as shown below. The function
 name can be overwritten with the attribute macro `#[entry_point(path = path::to::func)]` on the same struct.
 
+To facilitate validating component parameters at compile time, two attribute macros are provided:
+
+- For impl-based entry points: Add `#[component_impl]` before the impl block
+- For standalone entry point functions: Add `#[component_entry_point]` before the function
+
+These attributes validate that component parameters don't have conflicting combinations (like duplicate `ConfigMut<T>`
+parameters or mixing `Config<T>` and `ConfigMut<T>` for the same type). Without these attributes, the component will
+fail to compile. However, compilation error messages should indicate which attribute is needed.
+
 See [Samples](https://github.com/OpenDevicePartnership/patina/tree/main/components/patina_samples) or
 [Examples](#examples) for examples of basic components using these two methods.
 
@@ -91,9 +100,14 @@ in the function interface of a component.
 <!-- markdownlint-enable -->
 
 ``` admonish warning
-Certain combinations of parameters may lead to undefined behavior as they can allow multiple mutable accesses to the
-same data. Each parameter type checks for conflicts with previously registered accesses, but **ONLY** on debug builds.
-In release builds, these checks are disabled for performance and size reasons.
+Certain combinations of parameters are invalid and will cause compile-time errors. The `#[component_impl]` and
+`#[component_entry_point]` attributes are used to enforce parameter validation, detecting conflicts such as:
+
+- Duplicate `ConfigMut<T>` parameters with the same type T
+- Both `Config<T>` and `ConfigMut<T>` for the same type T
+- `&mut Storage` combined with `Config<T>` or `ConfigMut<T>`
+- `&Storage` combined with `ConfigMut<T>`
+- Multiple `Commands`, `StandardBootServices`, or `StandardRuntimeServices` parameters
 ```
 
 ### Config\<T\> / ConfigMut\<T\>
@@ -218,18 +232,20 @@ usage models for components and their parameters.
 use patina::{
     boot_services::StandardBootServices,
     component::{
-        IntoComponent,
+        IntoComponent, component_impl, component_entry_point,
         params::{Config, ConfigMut},
     },
     error::{EfiError, Result},
 };
 
+// Example 1: Standalone entry point function
 #[derive(IntoComponent)]
 #[entry_point(path = entry_point)]
 struct MyComponent {
     private_config: u32,
 }
 
+#[component_entry_point]
 fn entry_point(c: MyComponent, public_config: Config<u32>) -> patina::error::Result<()> {
     if *public_config != c.private_config {
         return Err(EfiError::Unsupported)
@@ -237,11 +253,13 @@ fn entry_point(c: MyComponent, public_config: Config<u32>) -> patina::error::Res
     Ok(())
 }
 
+// Example 2: Impl-based entry point (the more common pattern)
 #[derive(IntoComponent)]
 struct MyComponent2 {
     private_config: u32,
 }
 
+#[component_impl]
 impl MyComponent2 {
     fn entry_point(self, mut public_config: ConfigMut<u32>) -> patina::error::Result<()> {
         *public_config += self.private_config;

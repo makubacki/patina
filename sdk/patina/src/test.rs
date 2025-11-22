@@ -84,7 +84,7 @@ extern crate alloc;
 use core::{cell::UnsafeCell, fmt::Display, ptr::NonNull};
 
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use patina_macro::IntoService;
+use patina_macro::{IntoService, component_impl};
 use r_efi::efi::EVENT_GROUP_READY_TO_BOOT;
 
 use crate as patina;
@@ -319,6 +319,7 @@ pub struct TestRunner {
     fail_callback: Option<fn(&'static str, &'static str)>,
 }
 
+#[component_impl]
 impl TestRunner {
     /// Adds a filter that will reduce the tests ran to only those that contain the filter value in their test name.
     ///

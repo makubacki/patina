@@ -101,13 +101,14 @@ be used as seen below:
 # extern crate patina;
 use patina::{
    error::Result,
-   component::IntoComponent,
+   component::{IntoComponent, component_impl},
    test::patina_test,
 };
 
 #[derive(IntoComponent)]
 struct MyComponent(u32);
 
+#[component_impl]
 impl MyComponent {
    fn entry_point(self) -> Result<()> {
       Ok(())

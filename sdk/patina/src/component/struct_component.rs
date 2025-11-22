@@ -112,7 +112,7 @@ where
 mod tests {
     use crate as patina;
     use crate::component::{
-        IntoComponent,
+        IntoComponent, component_entry_point, component_impl,
         params::{Config, ConfigMut},
     };
 
@@ -123,6 +123,7 @@ mod tests {
         pub x: i32,
     }
 
+    #[component_impl]
     impl TestStructSuccess {
         fn entry_point(self, _cfg: crate::component::params::Config<i32>) -> crate::error::Result<()> {
             Ok(())
@@ -137,6 +138,7 @@ mod tests {
         B,
     }
 
+    #[component_entry_point]
     fn enum_entry_point(_s: TestEnumSuccess, _cfg: Config<i32>) -> crate::error::Result<()> {
         Ok(())
     }
@@ -147,6 +149,7 @@ mod tests {
         pub x: i32,
     }
 
+    #[component_impl]
     impl TestStructNotDispatched {
         fn entry_point(self, _cfg: ConfigMut<u32>) -> crate::error::Result<()> {
             Ok(())
@@ -159,6 +162,7 @@ mod tests {
         pub x: i32,
     }
 
+    #[component_impl]
     impl TestStructFail {
         fn entry_point(self) -> crate::error::Result<()> {
             Err(crate::error::EfiError::NotReady)
@@ -209,6 +213,7 @@ mod tests {
         _x: T,
     }
 
+    #[component_impl]
     impl<T> GenericStruct<T> {
         fn entry_point(self, _cfg: Config<u32>) -> crate::error::Result<()> {
             Ok(())
@@ -226,6 +231,7 @@ mod tests {
         _x: T,
     }
 
+    #[component_impl]
     impl<T: 'static> GenericStruct2<T> {
         fn entry_point(self, _cfg: Config<u32>) -> crate::error::Result<()> {
             Ok(())
@@ -246,6 +252,7 @@ mod tests {
             _x: u32,
         }
 
+        #[component_impl]
         impl ByValue {
             fn entry_point(self, _cfg: Config<u32>) -> crate::error::Result<()> {
                 Ok(())
@@ -263,6 +270,7 @@ mod tests {
             _x: u32,
         }
 
+        #[component_impl]
         impl ByRef {
             fn entry_point(&self, _cfg: Config<u32>) -> crate::error::Result<()> {
                 Ok(())
@@ -280,6 +288,7 @@ mod tests {
             _x: u32,
         }
 
+        #[component_impl]
         impl ByMut {
             fn entry_point(&mut self, _cfg: Config<u32>) -> crate::error::Result<()> {
                 Ok(())

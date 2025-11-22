@@ -13,7 +13,7 @@ use alloc::boxed::Box;
 use core::ffi::c_void;
 use patina::{
     boot_services::{BootServices, StandardBootServices},
-    component::{IntoComponent, service::Service},
+    component::{IntoComponent, component_impl, service::Service},
     error::{EfiError, Result},
     uefi_protocol::ProtocolInterface,
 };
@@ -191,6 +191,7 @@ impl EfiCpuArchProtocolImpl {
 #[derive(IntoComponent, Default)]
 pub(crate) struct CpuArchProtocolInstaller;
 
+#[component_impl]
 impl CpuArchProtocolInstaller {
     fn entry_point(
         self,

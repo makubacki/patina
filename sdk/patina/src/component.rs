@@ -33,15 +33,24 @@
 //! private internal configuration. To enable a struct or enum to be transformed into a [StructComponent], a derive
 //! macro, [IntoComponent] is provided to implement the corresponding trait automatically. By default, the macro
 //! expects the struct or enum to have a method named `entry_point` with the appropriate function signature, however
-//! this can be overridden with the `#[entry_point = path::to::function]` attribute.
+//! this can be overridden with the `#[entry_point(path = path::to::function)]` attribute.
 //!
-//! It is important to note that the function's first parameter must be `self` or `mut self`, **NOT** `&self` or
-//! `&mut self`. This design choice was made as components are only expected to be executed once, and by consuming
-//! `self`, you are able to pass ownership of the entire struct (or items within the struct) to other "things" (for
-//! lack of a better term) without the need for cloning or borrowing. The rest of the parameters must implement the
-//! [Param](params::Param) trait, which is described in more detail below. If not all parameters implement
-//! [Param](params::Param), the macro will succeed, but the underlying implementation will report a diagnostic error
-//! at compile time.
+//! The entry point function can be either:
+//! 1. An impl method: `impl MyComponent { fn entry_point(self, ...) -> Result<()> { } }`
+//! 2. A standalone function: `fn my_entry(comp: MyComponent, ...) -> Result<()> { }` with `#[entry_point(path = my_entry)]`
+//!
+//! For standalone entry point functions, `#[component_entry_point]` is used to validate parameters at compile time.
+//! For impl method entry points, `#[component_impl]` is used to validate entry point parameters at compile time. If
+//! the attribute is not provided, a compiler error will result indicating that the attribute should be applied to
+//! the entry point function or impl block.
+//!
+//! It is important to note that the function's first parameter must be `self` (for impl methods) or an explicit
+//! component type (for standalone functions), **NOT** `&self` or `&mut self`. This design choice was made as
+//! components are only expected to be executed once, and by consuming the component, you are able to pass ownership
+//! of the entire struct (or items within the struct) to other "things" (for lack of a better term) without the need
+//! for cloning or borrowing. The rest of the parameters must implement the [Param](params::Param) trait, which is
+//! described in more detail below. If not all parameters implement [Param](params::Param), the macro will succeed,
+//! but the underlying implementation will report a diagnostic error at compile time.
 //!
 //! Note: there is an arbitrary parameter count limit of 5, but this can be changed in the future if needed. See the
 //! [params] module for more information.
@@ -140,7 +149,31 @@ pub use storage::{Storage, UnsafeStorageCell};
 #[doc(hidden)]
 pub use struct_component::StructComponent;
 
-pub use patina_macro::IntoComponent;
+pub use patina_macro::{
+    IntoComponent, component_entry_point, component_impl, validate_component_params, validate_impl_entry_point,
+};
+
+/// A marker trait used internally to track which entry_point functions have been validated
+/// by the `#[component_entry_point]` attribute macro. This trait should not be implemented
+/// manually - it is automatically implemented by the macro after successful validation.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "Component entry point function is missing the `#[component_entry_point]` attribute",
+    note = "Add `#[component_entry_point]` before the entry_point function",
+    note = "Example:\n    #[component_entry_point]\n    fn entry_point(...) -> Result<()> {{ ... }}"
+)]
+pub trait ValidatedEntryPoint {}
+
+/// A marker trait used internally to track which component impl blocks have been validated
+/// by the `#[component_impl]` attribute macro. This trait should not be implemented
+/// manually - it is automatically implemented by the macro after successful validation.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "Component impl block is missing the `#[component_impl]` attribute",
+    note = "Add `#[component_impl]` before the impl block containing the `entry_point` method",
+    note = "Example:\n    #[component_impl]\n    impl {Self} {{\n        fn entry_point(self, ...) -> Result<()> {{ ... }}\n    }}"
+)]
+pub trait ValidatedComponentImpl {}
 
 /// An executable object whose parameters implement [Param](params::Param).
 pub trait Component {
@@ -205,6 +238,7 @@ mod tests {
     use crate::{
         Guid, OwnedGuid,
         component::{
+            component_impl,
             hob::{FromHob, Hob},
             params::ConfigMut,
         },
@@ -214,6 +248,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentSuccess;
 
+    #[component_impl]
     impl ComponentSuccess {
         fn entry_point(self) -> Result<()> {
             Ok(())
@@ -223,6 +258,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentNotDispatchedConfig;
 
+    #[component_impl]
     impl ComponentNotDispatchedConfig {
         fn entry_point(self, _: ConfigMut<u32>) -> Result<()> {
             Ok(())
@@ -232,6 +268,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentFail;
 
+    #[component_impl]
     impl ComponentFail {
         fn entry_point(self) -> Result<()> {
             Err(EfiError::Aborted)
@@ -246,6 +283,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentHobDep1;
 
+    #[component_impl]
     impl ComponentHobDep1 {
         fn entry_point(self, _hob: Hob<TestHob>) -> Result<()> {
             Ok(())
@@ -260,6 +298,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentHobDep2;
 
+    #[component_impl]
     impl ComponentHobDep2 {
         fn entry_point(self, _hob: Hob<TestHob2>) -> Result<()> {
             Ok(())
@@ -268,6 +307,7 @@ mod tests {
     #[derive(IntoComponent)]
     struct ComponentHobDep3;
 
+    #[component_impl]
     impl ComponentHobDep3 {
         fn entry_point(self, _hob: Hob<TestHob2>) -> Result<()> {
             Ok(())

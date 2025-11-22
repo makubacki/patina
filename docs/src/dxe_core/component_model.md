@@ -95,11 +95,12 @@ Once the component and its params are fully registered, the component is stored 
 ```rust,no_run
 # extern crate patina_dxe_core;
 # extern crate patina;
-# use patina::component::IntoComponent;
+# use patina::component::{IntoComponent, component_impl};
 # #[derive(IntoComponent, Default)]
 # struct ExampleComponent;
+# #[component_impl]
 # impl ExampleComponent {
-#   fn entry_point(self) -> patina::error::Result<()> { Ok(()) }  
+#   fn entry_point(self) -> patina::error::Result<()> { Ok(()) }
 # }
 use patina_dxe_core::*;
 

@@ -255,7 +255,7 @@ impl ComponentDispatcher {
 #[cfg(test)]
 #[coverage(off)]
 mod tests {
-    use patina::pi::hob::GuidHob;
+    use patina::{component::component_impl, pi::hob::GuidHob};
 
     use crate::test_support::with_global_lock;
 
@@ -289,6 +289,7 @@ mod tests {
         #[derive(patina::component::IntoComponent)]
         struct TestComponent;
 
+        #[component_impl]
         impl TestComponent {
             fn entry_point(self) -> patina::error::Result<()> {
                 Ok(())
@@ -397,6 +398,7 @@ mod tests {
         #[derive(patina::component::IntoComponent)]
         struct TestComponent;
 
+        #[component_impl]
         impl TestComponent {
             fn entry_point(
                 self,
@@ -437,6 +439,7 @@ mod tests {
 
         trait TestService {}
 
+        #[component_impl]
         impl TestComponent {
             fn entry_point(self, _: patina::component::service::Service<dyn TestService>) -> patina::error::Result<()> {
                 Ok(())
@@ -454,6 +457,7 @@ mod tests {
         #[derive(patina::component::IntoComponent)]
         struct TestComponent;
 
+        #[component_impl]
         impl TestComponent {
             fn entry_point(self) -> patina::error::Result<()> {
                 Err(patina::error::EfiError::Unsupported)

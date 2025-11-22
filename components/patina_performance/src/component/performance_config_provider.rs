@@ -18,7 +18,7 @@ extern crate alloc;
 
 use crate::config;
 use patina::component::{
-    IntoComponent,
+    IntoComponent, component_impl,
     hob::{FromHob, Hob},
     params::ConfigMut,
 };
@@ -45,6 +45,7 @@ pub struct PerformanceConfigHob {
     enabled_measurements: u32,
 }
 
+#[component_impl]
 impl PerformanceConfigurationProvider {
     /// Entry point for the Patina Performance Configuration Provider.
     ///

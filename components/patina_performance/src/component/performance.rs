@@ -17,7 +17,7 @@ use core::{clone::Clone, convert::AsRef};
 use patina::{
     boot_services::{BootServices, StandardBootServices, event::EventType, tpl::Tpl},
     component::{
-        IntoComponent,
+        IntoComponent, component_impl,
         hob::Hob,
         params::Config,
         service::{Service, perf_timer::ArchTimerFunctionality},
@@ -50,6 +50,7 @@ type MmPerformanceEventContext<BB, B, F> = Box<(BB, &'static TplMutex<'static, F
 #[derive(IntoComponent)]
 pub struct Performance;
 
+#[component_impl]
 impl Performance {
     /// Entry point of [`Performance`]
     #[coverage(off)] // This is tested via the generic version, see _entry_point.

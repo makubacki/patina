@@ -9,7 +9,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use patina::{
-    component::{IntoComponent, params::Config},
+    component::{IntoComponent, component_entry_point, component_impl, params::Config},
     error::Result,
 };
 
@@ -17,6 +17,7 @@ use patina::{
 #[derive(IntoComponent)]
 pub struct HelloStruct(pub &'static str);
 
+#[component_impl]
 impl HelloStruct {
     fn entry_point(self, age: Config<i32>) -> Result<()> {
         log::info!("Hello, {}! You are age {}!", self.0, *age);
@@ -35,6 +36,7 @@ pub enum GreetingsEnum {
 }
 
 // This example shows that the entry point function can be defined outside of the enum.
+#[component_entry_point]
 fn my_function(s: GreetingsEnum) -> Result<()> {
     match s {
         GreetingsEnum::Hello(name) => log::info!("Hello, {name}!"),

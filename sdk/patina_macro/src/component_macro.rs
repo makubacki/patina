@@ -9,7 +9,7 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, Generics, ItemEnum, ItemStruct, Meta, Token,
+    Attribute, Generics, ItemEnum, ItemStruct, Meta, Path, Token,
     parse::{Parse, Parser},
     parse2,
     punctuated::Punctuated,
@@ -155,9 +155,84 @@ pub(crate) fn component2(item: proc_macro2::TokenStream) -> proc_macro2::TokenSt
     let name = component.ident();
     let alloc_name = format_ident!("__alloc_component_{name}");
 
+    // Check if entry_point is a standalone function (not Self::entry_point or ComponentName::entry_point)
+    // If so, emit a validation check that requires the ValidatedEntryPoint marker
+    let entry_point_str = entry_point.to_string();
+    let component_name = name.to_string();
+    let is_impl_method =
+        entry_point_str.starts_with("Self ::") || entry_point_str.starts_with(&format!("{} ::", component_name));
+    let is_standalone = !is_impl_method;
+
+    // Parse entry_point path to get the function name
+    let path: Path = match parse2(entry_point.clone()) {
+        Ok(p) => p,
+        Err(_) => {
+            return quote! {
+                compile_error!("Failed to parse entry_point path");
+            };
+        }
+    };
+    let func_name = match path.segments.last() {
+        Some(seg) => &seg.ident,
+        None => {
+            return quote! {
+                compile_error!("Entry point path has no segments");
+            };
+        }
+    };
+
+    let validation_check = if is_standalone {
+        // Standalone functions: Require #[component_entry_point] marker trait
+        let validation_marker = format_ident!("__ValidatedEntryPoint_{}", func_name);
+        quote! {
+            // Compile-time check: Ensure the entry_point function has been validated
+            // with #[component_entry_point]. This will cause a clear error if the
+            // attribute is missing.
+            const _: fn() = || {
+                fn assert_validated<T: patina::component::ValidatedEntryPoint>() {}
+                assert_validated::<#validation_marker>();
+            };
+        }
+    } else {
+        // Enforced implicitly with the ComponentInput trait implementation
+        quote! {}
+    };
+
+    let component_input_impl = if is_standalone {
+        // Standalone components don't need ValidatedComponentImpl
+        quote! {
+            impl #lhs patina::component::params::ComponentInput for #name #rhs #where_clause {}
+        }
+    } else {
+        // Impl-based components require ValidatedComponentImpl
+        if let Some(ref wc) = where_clause {
+            let predicates = &wc.predicates;
+            quote! {
+                // For impl-based components, this impl serves as validation that #[component_impl] was used
+                impl #lhs patina::component::params::ComponentInput for #name #rhs
+                where
+                    #name #rhs: patina::component::ValidatedComponentImpl,
+                    #predicates
+                {}
+            }
+        } else {
+            quote! {
+                // For impl-based components, this impl serves as validation that #[component_impl] was used
+                impl #lhs patina::component::params::ComponentInput for #name #rhs
+                where
+                    #name #rhs: patina::component::ValidatedComponentImpl
+                {}
+            }
+        }
+    };
+
     quote! {
         extern crate alloc as #alloc_name;
-        impl #lhs patina::component::params::ComponentInput for #name #rhs #where_clause {}
+
+        #validation_check
+
+        #component_input_impl
+
         impl #lhs patina::component::IntoComponent<fn(#name #rhs)-> patina::error::Result<()>> for #name #rhs #where_clause {
             fn into_component(self) -> #alloc_name::boxed::Box<dyn patina::component::Component> {
                 #alloc_name::boxed::Box::new(
@@ -170,6 +245,56 @@ pub(crate) fn component2(item: proc_macro2::TokenStream) -> proc_macro2::TokenSt
         }
 
         //#component
+    }
+}
+
+/// Unified component attribute macro that derives IntoComponent and validates entry_point.
+///
+/// This macro provides a single-attribute solution for defining components with automatic
+/// parameter validation. It replaces the need for separate `#[derive(IntoComponent)]` and
+/// `#[component_entry_point]` attributes.
+///
+/// ## Usage
+///
+/// ```rust,ignore
+/// #[component]
+/// pub struct MyComponent {
+///     config: MyConfig,
+/// }
+///
+/// impl MyComponent {
+///     fn entry_point(self, config: Config<u32>) -> Result<()> {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// The macro will:
+/// - Generate the IntoComponent trait implementation
+/// - Validate that entry_point parameters don't conflict
+/// - Emit compile errors for invalid parameter combinations
+pub(crate) fn component_attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Parse the input as either a struct or enum
+    let component_def = match parse2::<Component>(item.clone()) {
+        Ok(component) => component,
+        Err(e) => return e.to_compile_error(),
+    };
+
+    // Generate the IntoComponent derive implementation
+    let derive_impl = component2(item);
+
+    // Return the original item plus the generated implementation
+    // Note: We don't validate the entry_point here because we don't have access
+    // to the impl block yet. Validation happens via #[component_entry_point] on
+    // the entry_point function itself.
+    let original_item = match component_def {
+        Component::Struct(s, _) => quote! { #s },
+        Component::Enum(e, _) => quote! { #e },
+    };
+
+    quote! {
+        #original_item
+        #derive_impl
     }
 }
 
@@ -188,7 +313,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyStruct;
-            impl patina::component::params::ComponentInput for MyStruct {}
+            impl patina::component::params::ComponentInput for MyStruct where MyStruct: patina::component::ValidatedComponentImpl {}
             impl patina::component::IntoComponent<fn(MyStruct)-> patina::error::Result<()>> for MyStruct {
                 fn into_component(self) -> __alloc_component_MyStruct::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyStruct::boxed::Box::new(
@@ -215,7 +340,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyEnum;
-            impl patina::component::params::ComponentInput for MyEnum {}
+            impl patina::component::params::ComponentInput for MyEnum where MyEnum: patina::component::ValidatedComponentImpl {}
             impl patina::component::IntoComponent<fn(MyEnum)-> patina::error::Result<()>> for MyEnum {
                 fn into_component(self) -> __alloc_component_MyEnum::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyEnum::boxed::Box::new(
@@ -255,7 +380,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyStruct;
-            impl patina::component::params::ComponentInput for MyStruct {}
+            impl patina::component::params::ComponentInput for MyStruct where MyStruct: patina::component::ValidatedComponentImpl {}
             impl patina::component::IntoComponent<fn(MyStruct)-> patina::error::Result<()>> for MyStruct {
                 fn into_component(self) -> __alloc_component_MyStruct::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyStruct::boxed::Box::new(
@@ -279,7 +404,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyStruct;
-            impl<T> patina::component::params::ComponentInput for MyStruct<T> {}
+            impl<T> patina::component::params::ComponentInput for MyStruct<T> where MyStruct<T>: patina::component::ValidatedComponentImpl {}
             impl<T> patina::component::IntoComponent<fn(MyStruct<T>)-> patina::error::Result<()>> for MyStruct<T> {
                 fn into_component(self) -> __alloc_component_MyStruct::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyStruct::boxed::Box::new(
@@ -306,7 +431,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyEnum;
-            impl<T> patina::component::params::ComponentInput for MyEnum<T> {}
+            impl<T> patina::component::params::ComponentInput for MyEnum<T> where MyEnum<T>: patina::component::ValidatedComponentImpl {}
             impl<T> patina::component::IntoComponent<fn(MyEnum<T>) -> patina::error::Result<()>> for MyEnum<T> {
                 fn into_component(self) -> __alloc_component_MyEnum::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyEnum::boxed::Box::new(
@@ -334,7 +459,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyStruct;
-            impl<T> patina::component::params::ComponentInput for MyStruct<T> where T: Debug {}
+            impl<T> patina::component::params::ComponentInput for MyStruct<T> where MyStruct<T>: patina::component::ValidatedComponentImpl, T: Debug {}
             impl<T> patina::component::IntoComponent<fn(MyStruct<T>)-> patina::error::Result<()>> for MyStruct<T> where T: Debug {
                 fn into_component(self) -> __alloc_component_MyStruct::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyStruct::boxed::Box::new(
@@ -358,7 +483,7 @@ mod tests {
 
         let expected = quote! {
             extern crate alloc as __alloc_component_MyStruct;
-            impl<T: Debug> patina::component::params::ComponentInput for MyStruct<T> {}
+            impl<T: Debug> patina::component::params::ComponentInput for MyStruct<T> where MyStruct<T>: patina::component::ValidatedComponentImpl {}
             impl<T: Debug> patina::component::IntoComponent<fn(MyStruct<T>)-> patina::error::Result<()>> for MyStruct<T> {
                 fn into_component(self) -> __alloc_component_MyStruct::boxed::Box<dyn patina::component::Component> {
                     __alloc_component_MyStruct::boxed::Box::new(

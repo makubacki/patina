@@ -14,6 +14,7 @@ mod hob_macro;
 mod service_macro;
 mod smbios_record_macro;
 mod test_macro;
+mod validate_params_macro;
 
 /// Derive Macro for implementing the `IntoComponent` trait for a type.
 ///
@@ -75,6 +76,52 @@ mod test_macro;
 #[proc_macro_derive(IntoComponent, attributes(entry_point, protocol))]
 pub fn component(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     component_macro::component2(item.into()).into()
+}
+
+/// Component attribute macro that derives IntoComponent.
+///
+/// This macro provides a convenient single-attribute solution for defining components.
+/// It automatically derives the IntoComponent trait for the struct or enum.
+///
+/// For parameter validation on the entry_point function, use `#[component_entry_point]`
+/// on the entry_point function itself.
+///
+/// ## Usage
+///
+/// ```rust,ignore
+/// use patina::component::prelude::*;
+///
+/// #[component]
+/// pub struct MyComponent {
+///     config: u32,
+/// }
+///
+/// impl MyComponent {
+///     #[component_entry_point]
+///     fn entry_point(self, config: Config<u32>) -> Result<()> {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// ## Attributes
+///
+/// - `entry_point`: Override the default entry point path (optional)
+///
+/// ## Example with custom entry point
+///
+/// ```rust,ignore
+/// #[component]
+/// #[entry_point(path = my_custom_entry)]
+/// pub struct MyComponent;
+///
+/// fn my_custom_entry(comp: MyComponent) -> Result<()> {
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn component_attr(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    component_macro::component_attribute(attr.into(), item.into()).into()
 }
 
 /// Derive Macro for implementing the `IntoService` trait for a type.
@@ -210,7 +257,7 @@ pub fn patina_test(_: proc_macro::TokenStream, item: proc_macro::TokenStream) ->
 
 /// Derive Macro for implementing the `SmbiosRecordStructure` trait.
 ///
-/// This macro automatically generates a complete `SmbiosRecordStructure` trait  
+/// This macro automatically generates a complete `SmbiosRecordStructure` trait
 /// implementation, eliminating the need for manual boilerplate code.
 ///
 /// ## Macro Attributes
@@ -258,4 +305,151 @@ pub fn patina_test(_: proc_macro::TokenStream, item: proc_macro::TokenStream) ->
 #[proc_macro_derive(SmbiosRecord, attributes(smbios, string_pool))]
 pub fn smbios_record(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     smbios_record_macro::smbios_record_derive(item.into()).into()
+}
+
+/// Attribute macro for validating component entry_point parameters at compile time.
+///
+/// This macro analyzes the function signature and emits compile errors if it detects
+/// parameter conflicts.
+///
+/// ## Usage
+///
+/// ```rust, ignore
+/// use patina::component::IntoComponent;
+/// use patina_macro::validate_component_params;
+///
+/// #[derive(IntoComponent)]
+/// struct MyComponent;
+///
+/// impl MyComponent {
+///     #[validate_component_params]
+///     fn entry_point(self, config: ConfigMut<u32>) -> Result<()> {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// ## Example Error
+///
+/// ```compile_fail
+/// #[validate_component_params]
+/// fn entry_point(self, c1: ConfigMut<u32>, c2: ConfigMut<u32>) -> Result<()> {
+///     // Compile error: Duplicate parameter type detected
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn validate_component_params(
+    attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    validate_params_macro::validate_component_params2(attr.into(), item.into()).into()
+}
+
+/// Attribute macro for component entry points with automatic parameter validation.
+///
+/// This macro validates component entry point parameters at compile time and emits a
+/// marker trait proving validation occurred.
+///
+/// ## Usage with Standalone Functions (functions outside an `impl` block)
+///
+/// ```rust, ignore
+/// use patina::component::{IntoComponent, component_entry_point};
+///
+/// #[derive(IntoComponent)]
+/// #[entry_point(path = my_entry)]
+/// pub struct MyComponent {
+///     data: u32,
+/// }
+///
+/// #[component_entry_point]
+/// fn my_entry(
+///     comp: MyComponent,
+///     config: Config<u32>,
+///     commands: Commands,
+/// ) -> patina::error::Result<()> {
+///     commands.add_service(MyService::new(comp.data));
+///     Ok(())
+/// }
+/// ```
+///
+/// ## Usage with Impl Methods
+///
+/// ```rust, ignore
+/// #[derive(IntoComponent)]
+/// pub struct MyComponent;
+///
+/// impl MyComponent {
+///     fn entry_point(self, config: Config<u32>) -> Result<()> {
+///         // Impl methods don't require #[component_entry_point]
+///         Ok(())
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn component_entry_point(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    validate_params_macro::component_entry_point(attr.into(), item.into()).into()
+}
+
+/// Attribute macro for validating impl method entry points.
+///
+/// Use this macro on impl method entry points to validate parameters at compile time.
+///
+/// ## Usage
+///
+/// ```rust, ignore
+/// use patina::component::{IntoComponent, validate_impl_entry_point};
+///
+/// #[derive(IntoComponent)]
+/// pub struct MyComponent {
+///     data: u32,
+/// }
+///
+/// impl MyComponent {
+///     #[validate_impl_entry_point]
+///     fn entry_point(self, config: Config<u32>, commands: Commands) -> patina::error::Result<()> {
+///         commands.add_service(MyService::new(self.data));
+///         Ok(())
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn validate_impl_entry_point(
+    attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    validate_params_macro::validate_impl_entry_point(attr.into(), item.into()).into()
+}
+
+/// Attribute macro for validating component impl blocks.
+///
+/// This macro validates an entire impl block and ensures the entry_point method has valid
+/// parameters. It emits a marker proving validation occurred, which is checked by the
+/// `#[derive(IntoComponent)]` macro.
+///
+/// This attribute is mandatory for impl-based components.
+///
+/// ## Usage
+///
+/// ```rust, ignore
+/// use patina::component::{IntoComponent, component_impl};
+///
+/// #[derive(IntoComponent)]
+/// pub struct MyComponent {
+///     data: u32,
+/// }
+///
+/// #[component_impl]
+/// impl MyComponent {
+///     fn entry_point(self, config: Config<u32>) -> Result<()> {
+///         Ok(())
+///     }
+/// }
+/// ```
+///
+/// ## Enforcement
+///
+/// The `#[derive(IntoComponent)]` macro automatically checks for the validation marker.
+#[proc_macro_attribute]
+pub fn component_impl(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    validate_params_macro::component_impl(attr.into(), item.into()).into()
 }

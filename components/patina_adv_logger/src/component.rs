@@ -13,7 +13,7 @@ use alloc::boxed::Box;
 use patina::{
     boot_services::{BootServices, StandardBootServices},
     component::{
-        IntoComponent,
+        IntoComponent, component_impl,
         service::{Service, perf_timer::ArchTimerFunctionality},
     },
     error::{EfiError, Result},
@@ -45,6 +45,7 @@ where
     adv_logger: &'static AdvancedLogger<'static, S>,
 }
 
+#[component_impl]
 impl<S> AdvancedLoggerComponent<S>
 where
     S: SerialIO + Send + 'static,

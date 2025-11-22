@@ -23,7 +23,7 @@ use patina::{
     Guid,
     boot_services::StandardBootServices,
     component::{
-        IntoComponent, Storage,
+        IntoComponent, Storage, component_impl,
         service::{IntoService, Service},
     },
 };
@@ -163,6 +163,7 @@ pub struct MmCommunicator {
     notify_context: Option<&'static comm_buffer_update::ProtocolNotifyContext>,
 }
 
+#[component_impl]
 impl MmCommunicator {
     /// Create a new `MmCommunicator` instance for testing.
     pub fn new() -> Self {

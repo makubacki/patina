@@ -29,13 +29,14 @@
 use criterion::{Bencher, Criterion, criterion_group, criterion_main};
 use patina::{
     boot_services::StandardBootServices,
-    component::{Component, IntoComponent, Storage, params::*},
+    component::{Component, IntoComponent, Storage, component_impl, params::*},
     error::Result,
 };
 
 #[derive(IntoComponent)]
 struct TestComponent;
 
+#[component_impl]
 impl TestComponent {
     fn entry_point(self, _bs: StandardBootServices, _config: Config<i32>) -> Result<()> {
         Ok(())

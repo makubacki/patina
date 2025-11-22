@@ -150,7 +150,7 @@ Patina compiles all components into a single binary:
 # extern crate patina_dxe_core;
 # extern crate patina;
 # extern crate patina_ffs_extractors;
-# use patina::component::IntoComponent;
+# use patina::component::{IntoComponent, component_impl};
 # use patina_ffs_extractors::LzmaSectionExtractor;
 # // Note: Begin mock types for compilation
 # #[derive(Default)]
@@ -159,18 +159,21 @@ Patina compiles all components into a single binary:
 # }
 # #[derive(IntoComponent)]
 # struct MemoryManagerExampleComponent;
+# #[component_impl]
 # impl MemoryManagerExampleComponent {
 #     fn new() -> Self { MemoryManagerExampleComponent }
 #    fn entry_point(self) -> patina::error::Result<()> { Ok(()) }
 # }
 # #[derive(IntoComponent)]
 # struct SecurityPolicyExampleComponent;
+# #[component_impl]
 # impl SecurityPolicyExampleComponent {
 #    fn new() -> Self { SecurityPolicyExampleComponent }
 #    fn entry_point(self) -> patina::error::Result<()> { Ok(()) }
 # }
 # #[derive(IntoComponent)]
 # struct DeviceDriverExampleComponent;
+# #[component_impl]
 # impl DeviceDriverExampleComponent {
 #    fn new() -> Self { DeviceDriverExampleComponent }
 #    fn entry_point(self) -> patina::error::Result<()> { Ok(()) }

@@ -32,7 +32,7 @@ extern crate alloc;
 
 use alloc::{string::String, vec};
 use patina::{
-    component::{IntoComponent, service::Service},
+    component::{IntoComponent, component_impl, service::Service},
     error::Result,
 };
 use patina_macro::SmbiosRecord;
@@ -77,6 +77,7 @@ pub struct VendorOemRecord {
 #[derive(IntoComponent, Default)]
 pub struct SmbiosExampleComponent;
 
+#[component_impl]
 impl SmbiosExampleComponent {
     /// Create a new SMBIOS platform component
     pub fn new() -> Self {
