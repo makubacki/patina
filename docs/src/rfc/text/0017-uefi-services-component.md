@@ -287,13 +287,13 @@ Additional runtime service abstractions:
 Components consume UEFI services through normal service dependency injection:
 
 ```rust
-use patina_sdk::component::{IntoComponent, prelude::Service};
+use patina_sdk::component::{component, prelude::Service};
 use patina_uefi_services::service::console::ConsoleServices;
 use patina_sdk::error::Result;
 
-#[derive(IntoComponent)]
-struct MyComponent;
+pub struct MyComponent;
 
+#[component]
 impl MyComponent {
     fn entry_point(
         self,
@@ -324,7 +324,7 @@ that provide only the functionality they need.
 To use UEFI services in a component, add the relevant service as a dependency in the component's entry point:
 
 ```rust
-use patina_sdk::component::{IntoComponent, prelude::Service};
+use patina_sdk::component::{component, prelude::Service};
 use patina_uefi_services::service::{
     console::ConsoleServices,
     event::EventServices,
@@ -332,9 +332,9 @@ use patina_uefi_services::service::{
 };
 use patina_sdk::error::Result;
 
-#[derive(IntoComponent)]
-struct MyFirmwareComponent;
+pub struct MyFirmwareComponent;
 
+#[component]
 impl MyFirmwareComponent {
     fn entry_point(
         self,

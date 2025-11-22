@@ -9,8 +9,9 @@
 //! # use core::ffi::c_void;
 //! # use patina_dxe_core::*;
 //! # use patina_ffs_extractors::NullSectionExtractor;
-//! # #[derive(patina::component::IntoComponent, Default)]
+//! # #[derive(Default)]
 //! # struct ExampleComponent;
+//! # #[patina::component::component]
 //! # impl ExampleComponent {
 //! #     fn entry_point(self) -> patina::error::Result<()> { Ok(()) }
 //! # }
@@ -255,8 +256,9 @@ static __SELF: Once<NonZeroUsize> = Once::new();
 /// # use core::ffi::c_void;
 /// # use patina_dxe_core::*;
 /// # use patina_ffs_extractors::NullSectionExtractor;
-/// # #[derive(patina::component::IntoComponent, Default)]
+/// # #[derive(Default)]
 /// # struct ExampleComponent;
+/// # #[patina::component::component]
 /// # impl ExampleComponent {
 /// #     fn entry_point(self) -> patina::error::Result<()> { Ok(()) }
 /// # }

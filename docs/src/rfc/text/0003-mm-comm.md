@@ -261,11 +261,19 @@ pub trait MmCommunication {
 /// the response is stored in the same buffer.
 ///
 /// #
-#[derive(IntoComponent, IntoService)]
+#[derive(IntoService)]
 #[service(dyn MmCommunication)]
 pub struct MmCommunicator {
     comm_buffers: RefCell<Vec<CommunicateBuffer>>,
     sw_mmi_trigger_service: Option<Service<dyn SwMmiTrigger>>,
+}
+
+#[component]
+impl MmCommunicator {
+    fn entry_point(self, /* dependencies */) -> patina_sdk::error::Result<()> {
+        // Component initialization logic
+        Ok(())
+    }
 }
 ```
 
@@ -297,10 +305,18 @@ pub unsafe trait SwMmiTrigger {
 ```
 
 ```rust
-#[derive(IntoComponent, IntoService, Default)]
+#[derive(IntoService, Default)]
 #[service(dyn SwMmiTrigger)]
 pub struct SwMmiManager {
     mm_config: MmConfigurationConfig,
+}
+
+#[component]
+impl SwMmiManager {
+    fn entry_point(self, /* dependencies */) -> patina_sdk::error::Result<()> {
+        // Component initialization logic
+        Ok(())
+    }
 }
 ```
 
