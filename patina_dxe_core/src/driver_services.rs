@@ -319,10 +319,13 @@ pub unsafe fn core_connect_controller(
 ) -> Result<(), EfiError> {
     authenticate_connect(handle, remaining_device_path, recursive)?;
 
+    // Snapshot child handles before connecting the controller.
+    let child_handles_snapshot = if recursive { PROTOCOL_DB.get_child_handles(handle) } else { Vec::new() };
+
     let return_status = core_connect_single_controller(handle, driver_handles, remaining_device_path);
 
     if recursive {
-        for child in PROTOCOL_DB.get_child_handles(handle) {
+        for child in child_handles_snapshot {
             //ignore the return value to match behavior of edk2 reference.
             _ = unsafe { core_connect_controller(child, Vec::new(), None, true) };
         }
