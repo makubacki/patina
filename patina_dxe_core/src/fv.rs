@@ -396,15 +396,7 @@ extern "efiapi" fn fv_read_file(
     // Safety: caller must provide a valid pointer for buffer. It is null-checked above.
     let mut local_buffer_ptr = unsafe { buffer.read_unaligned() };
 
-    if local_buffer_size > 0 {
-        //caller indicates they have allocated a buffer to receive the file data.
-        if local_buffer_size < file.content().len() {
-            return efi::Status::BUFFER_TOO_SMALL;
-        }
-        if local_buffer_ptr.is_null() {
-            return efi::Status::INVALID_PARAMETER;
-        }
-    } else {
+    if local_buffer_ptr.is_null() {
         //caller indicates that they wish to receive file data, but that this
         //routine should allocate a buffer of appropriate size. Since the caller
         //is expected to free this buffer via free_pool, we need to manually
@@ -417,6 +409,8 @@ extern "efiapi" fn fv_read_file(
                 buffer.write_unaligned(local_buffer_ptr);
             },
         }
+    } else if file.content().len() > local_buffer_size {
+        return efi::Status::BUFFER_TOO_SMALL;
     }
 
     // convert pointer+size into a slice and copy the file data.
@@ -1494,10 +1488,22 @@ mod tests {
                         file_attributes,
                         auth_valid_p,
                     );
-                    /* Raise Bug for this case , case when Buffer size is 0 and buffer not NULL. last block*/
-                    /*fv_read_file(fv_ptr1 , guid_valid_ref, (&mut buffer_valid as *mut *mut c_void),
-                    buffer_equal_0p, found_type_ref, file_attributes,
-                    auth_valid_p ); */
+
+                    // Test case: buffer_size is 0 but buffer pointer is non-null
+                    // BUFFER_TOO_SMALL is returned if the file content is larger than 0 bytes.
+                    let mut buffer_size_zero = 0usize;
+                    let buffer_size_zero_ptr: *mut usize = &mut buffer_size_zero;
+                    let status = fv_read_file(
+                        fv_ptr1,
+                        guid_valid_ref,
+                        &mut buffer_valid3 as *mut *mut c_void,
+                        buffer_size_zero_ptr,
+                        found_type_ref,
+                        file_attributes,
+                        auth_valid_p,
+                    );
+                    assert_eq!(status, efi::Status::BUFFER_TOO_SMALL);
+
                     /* Free Memory */
                     dealloc(buffer_valid3 as *mut u8, layout3);
                 };
