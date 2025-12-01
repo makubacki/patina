@@ -234,6 +234,57 @@ enum ParamType {
     Other,                   // Any other parameter type
 }
 
+impl ParamType {
+    /// Checks if this parameter type conflicts with another parameter type.
+    ///
+    /// Returns `Some(error_message)` if there is a conflict, or `None` if there is no conflict.
+    /// The error message describes the nature of the conflict.
+    fn conflicts_with(&self, other: &ParamType) -> Option<&'static str> {
+        match (self, other) {
+            // Duplicate ConfigMut<T> with the same inner type
+            (ParamType::ConfigMut(t1), ParamType::ConfigMut(t2)) if t1 == t2 => {
+                Some("Each ConfigMut<T> type can only appear once in a component's entry point.")
+            }
+
+            // Config<T> conflicts with ConfigMut<T> for the same type
+            (ParamType::Config(t1), ParamType::ConfigMut(t2)) | (ParamType::ConfigMut(t1), ParamType::Config(t2))
+                if t1 == t2 =>
+            {
+                Some("You cannot have both Config<T> and ConfigMut<T> for the same type.")
+            }
+
+            // &mut Storage conflicts with Config<T> or ConfigMut<T>
+            (ParamType::StorageMut, ParamType::Config(_))
+            | (ParamType::Config(_), ParamType::StorageMut)
+            | (ParamType::StorageMut, ParamType::ConfigMut(_))
+            | (ParamType::ConfigMut(_), ParamType::StorageMut) => {
+                Some("You cannot use &mut Storage together with Config<T> or ConfigMut<T> parameters.")
+            }
+
+            // &Storage conflicts with ConfigMut<T>
+            (ParamType::Storage, ParamType::ConfigMut(_)) | (ParamType::ConfigMut(_), ParamType::Storage) => {
+                Some("You cannot use &Storage together with ConfigMut<T> parameters.")
+            }
+
+            // Duplicate Commands
+            (ParamType::Commands, ParamType::Commands) => Some("Only one Commands parameter is allowed."),
+
+            // Duplicate StandardBootServices
+            (ParamType::StandardBootServices, ParamType::StandardBootServices) => {
+                Some("Only one StandardBootServices parameter is allowed.")
+            }
+
+            // Duplicate StandardRuntimeServices
+            (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
+                Some("Only one StandardRuntimeServices parameter is allowed.")
+            }
+
+            // No conflict
+            _ => None,
+        }
+    }
+}
+
 /// Normalize a type path to its canonical string representation.
 ///
 /// Converts type paths to a consistent format that allows comparing
@@ -396,91 +447,42 @@ pub(crate) fn check_param_conflicts(func: &ItemFn) -> Result<(), TokenStream> {
             let (idx1, type1, name1, span1) = &params[i];
             let (idx2, type2, name2, span2) = &params[j];
 
-            match (type1, type2) {
-                // Duplicate ConfigMut<T>
-                (ParamType::ConfigMut(t1), ParamType::ConfigMut(t2)) if t1 == t2 => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). Each ConfigMut<{}> type can only appear once in a component's entry point.",
-                        name2, idx2, name1, idx1, t1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("first '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
+            if let Some(conflict_msg) = type1.conflicts_with(type2) {
+                // Build a detailed error message with parameter information
+                // For ConfigMut conflicts, include the concrete type in the message
+                let detailed_conflict_msg = match (type1, type2) {
+                    (ParamType::ConfigMut(t1), ParamType::ConfigMut(_)) => {
+                        format!("Each ConfigMut<{}> type can only appear once in a component's entry point.", t1)
+                    }
+                    (ParamType::Config(t1), ParamType::ConfigMut(_))
+                    | (ParamType::ConfigMut(t1), ParamType::Config(_)) => {
+                        format!("You cannot have both Config<{}> and ConfigMut<{}> for the same type.", t1, t1)
+                    }
+                    _ => conflict_msg.to_string(),
+                };
 
-                // Config<T> conflicts with ConfigMut<T>
-                (ParamType::Config(t1), ParamType::ConfigMut(t2))
-                | (ParamType::ConfigMut(t1), ParamType::Config(t2))
-                    if t1 == t2 =>
-                {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). You cannot have both Config<{}> and ConfigMut<{}> for the same type.",
-                        name2, idx2, name1, idx1, t1, t2
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("conflicts with '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
+                let error_msg = format!(
+                    "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). {}",
+                    name2, idx2, name1, idx1, detailed_conflict_msg
+                );
 
-                // &mut Storage conflicts with Config<T> or ConfigMut<T>
-                (ParamType::StorageMut, ParamType::Config(_))
-                | (ParamType::Config(_), ParamType::StorageMut)
-                | (ParamType::StorageMut, ParamType::ConfigMut(_))
-                | (ParamType::ConfigMut(_), ParamType::StorageMut) => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). You cannot use &mut Storage together with Config<T> or ConfigMut<T> parameters.",
-                        name2, idx2, name1, idx1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("conflicts with '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
+                // Create the primary error at the second parameter location
+                let mut error = syn::Error::new(*span2, error_msg);
 
-                // &Storage conflicts with ConfigMut<T>
-                (ParamType::Storage, ParamType::ConfigMut(_)) | (ParamType::ConfigMut(_), ParamType::Storage) => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). You cannot use &Storage together with ConfigMut<T> parameters.",
-                        name2, idx2, name1, idx1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("conflicts with '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
+                // Add a note pointing to the first conflicting parameter
+                // Use "first..." for duplicate parameters, "conflicts with..." for incompatible types
+                let note_msg = match (type1, type2) {
+                    (ParamType::ConfigMut(_), ParamType::ConfigMut(_))
+                    | (ParamType::Commands, ParamType::Commands)
+                    | (ParamType::StandardBootServices, ParamType::StandardBootServices)
+                    | (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
+                        format!("first '{}' parameter here", name1)
+                    }
+                    _ => format!("conflicts with '{}' parameter here", name1),
+                };
+                error.combine(syn::Error::new(*span1, note_msg));
 
-                // Duplicate Commands
-                (ParamType::Commands, ParamType::Commands) => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). Only one Commands parameter is allowed.",
-                        name2, idx2, name1, idx1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("first '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
-
-                // Duplicate StandardBootServices
-                (ParamType::StandardBootServices, ParamType::StandardBootServices) => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). Only one StandardBootServices parameter is allowed.",
-                        name2, idx2, name1, idx1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("first '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
-
-                // Duplicate StandardRuntimeServices
-                (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
-                    let error_msg = format!(
-                        "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). Only one StandardRuntimeServices parameter is allowed.",
-                        name2, idx2, name1, idx1
-                    );
-                    let mut error = syn::Error::new(*span2, error_msg);
-                    error.combine(syn::Error::new(*span1, format!("first '{}' parameter here", name1)));
-                    return Err(error.to_compile_error());
-                }
-
-                _ => {} // No conflict
+                return Err(error.to_compile_error());
             }
         }
     }
