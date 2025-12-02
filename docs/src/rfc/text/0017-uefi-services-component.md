@@ -23,7 +23,9 @@ here, but are not in scope for this RFC.
   can be used as injected dependencies in a component.
 - 2025-10-1: Update the section about Patina component and C driver dispatch to reflect recent changes that interleave
   component and C driver dispatch.
--2025-10-1: Add mocking note to service interfaces section.
+- 2025-10-1: Add mocking note to service interfaces section.
+- 2025-12-02: Update examples to reflect new component attribute syntax where `#[component]` is applied to impl
+blocks and entry points are always named `entry_point`.
 
 ## Motivation
 

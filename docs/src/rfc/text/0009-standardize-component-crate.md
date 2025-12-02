@@ -71,14 +71,8 @@ If testing a component, the test name should be prefixed with `test_<component_n
 test name should be prefixed with `test_<service_name>_`. In both cases, CamelCase should be converted to snake_case.
 
 ```rust
-pub struct MyComponent(u32);
-
-#[component]
-impl MyComponent {
-    fn entry_point(self) -> Result<()> {
-        Ok(())
-    }
-}
+#[derive(IntoComponent)]
+struct MyComponent(u32);
 
 trait MyService {
    fn do_something(&self) -> u32
