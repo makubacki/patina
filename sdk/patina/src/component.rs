@@ -59,10 +59,8 @@
 //!
 //! ### Entry Point Requirements
 //!
-//! The entry point function's first parameter must be `self`, **NOT** `&self` or `&mut self`. This design choice
-//! allows components to be executed once and pass ownership of the entire struct (or items within the struct) to
-//! other components or services without cloning or borrowing. The rest of the parameters must implement the
-//! [Param](params::Param) trait, which is described in more detail below.
+//! The entry point function's first parameter must be `self, `mut self`, `&self` or `&mut self`. The rest of the
+//! parameters must implement the [Param](params::Param) trait, which is described in more detail below.
 //!
 //! Note: there is an arbitrary parameter count limit of 5, but this can be changed in the future if needed. See the
 //! [params] module for more information.

@@ -9,10 +9,8 @@
 //! function of `Self::entry_point` exists. This can be overridden with the `#[entry_point(path = path::to::function)]`
 //! attribute.
 //!
-//! It is important to note that the function's first parameter must be `self` or `mut self`, **NOT** `&self` or
-//! `&mut self`. This design choice was made as components are only expected to be executed once, and by consuming
-//! `self`, you are able to pass ownership of the entire struct (or items within the struct) to other "things" (for
-//! lack of a better term) without the need for cloning or borrowing.
+//! It is important to note that the function's first parameter must be `self`, `mut self`, `&self` or
+//! `&mut self`.
 //!
 //! Review [Param] implementations for all types that can be used as parameters to these functions.
 //!

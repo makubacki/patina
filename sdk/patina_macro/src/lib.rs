@@ -243,7 +243,7 @@ pub fn smbios_record(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// ## Validation Rules
 ///
 /// - Impl block must contain an `entry_point` method
-/// - Entry point must have `self`, `&self`, or `&mut self` as first parameter
+/// - Entry point must have `self`, `mut self``, `&self`, or `&mut self` as the first parameter
 /// - No duplicate `ConfigMut<T>` parameters with the same type T
 /// - Cannot have both `Config<T>` and `ConfigMut<T>` for the same type T
 /// - Cannot use `&mut Storage` with `Config<T>` or `ConfigMut<T>`
