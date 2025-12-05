@@ -1887,7 +1887,7 @@ mod tests {
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
 
-            // Pre-poulatee the allocator with a small existing region
+            // Pre-populate the allocator with a small existing region
             let existing_region_size = 0x20000;
             let existing_region_addr = GCD
                 .allocate_memory_space(
