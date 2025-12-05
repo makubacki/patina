@@ -233,6 +233,11 @@ impl UefiAllocator {
     pub fn stats(&self) -> AllocationStatistics {
         self.allocator.stats()
     }
+
+    /// Expands the allocator with a new memory region.
+    pub(crate) fn expand(&self, region: NonNull<[u8]>) -> Result<(), EfiError> {
+        self.allocator.lock().expand(region).map_err(|_| EfiError::InvalidParameter)
+    }
 }
 
 unsafe impl GlobalAlloc for UefiAllocator {

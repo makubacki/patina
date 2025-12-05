@@ -328,8 +328,40 @@ impl AllocatorMap {
                 NonNull::from_ref(Box::leak(Box::new(EFiMemoryTypeInformation { memory_type, number_of_pages: 0 })))
             };
 
-            Box::leak(Box::new(UefiAllocator::new(&GCD, memory_type_info, handle, granularity)))
+            let allocator = Box::leak(Box::new(UefiAllocator::new(&GCD, memory_type_info, handle, granularity)));
+
+            // Initialize the allocator with existing memory regions of this type from the GCD.
+            Self::initialize_allocator_with_existing_regions(allocator, handle);
+
+            allocator
         })
+    }
+
+    /// Initializes a newly-created allocator with existing memory regions from the GCD
+    /// that match the allocator's handle.
+    ///
+    /// This prevents the MIN_EXPANSION policy from being triggered on first allocation
+    /// when suitable memory already exists.
+    fn initialize_allocator_with_existing_regions(allocator: &UefiAllocator, handle: efi::Handle) {
+        let mut descriptors: Vec<dxe_services::MemorySpaceDescriptor> =
+            Vec::with_capacity(GCD.memory_descriptor_count() + 10);
+        if GCD.get_memory_descriptors(&mut descriptors).is_err() {
+            // Just proceed without initializing if there is a problem retrieving descriptors
+            return;
+        }
+
+        for descriptor in descriptors.iter() {
+            if descriptor.image_handle == handle && !descriptor.image_handle.is_null() {
+                let region_ptr = descriptor.base_address as *mut u8;
+                let region_size = descriptor.length as usize;
+                if let Some(ptr) = NonNull::new(region_ptr) {
+                    let region = NonNull::slice_from_raw_parts(ptr, region_size);
+                    // Expand the allocator with this existing region
+                    // If this fails, new memory can be allocated later
+                    let _ = allocator.expand(region);
+                }
+            }
+        }
     }
 
     // retrieves an allocator if it exists

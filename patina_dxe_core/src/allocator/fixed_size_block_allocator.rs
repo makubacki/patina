@@ -1831,4 +1831,99 @@ mod tests {
             assert_eq!(result, config.expected, "Test config: {config:?}");
         }
     }
+
+    /// Tests that MIN_EXPANSION is used if an allocator starts empty (allocators: None).
+    #[test]
+    fn test_small_allocation_triggers_min_expansion_when_empty() {
+        with_locked_state(|| {
+            static GCD: SpinLockedGcd = SpinLockedGcd::new(None);
+            init_gcd(&GCD, 0x800000);
+
+            // Create an allocator for ACPI Reclaim memory (uses 4KB granularity)
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
+                &GCD,
+                DUMMY_HANDLE,
+                memory_type_info(efi::ACPI_RECLAIM_MEMORY),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+            );
+
+            let initial_pages = unsafe { fsb.lock().memory_type_info.as_ref().number_of_pages };
+
+            // Try to allocate 292 bytes
+            let small_layout = Layout::from_size_align(292, 8).unwrap();
+            let allocation = fsb.allocate(small_layout);
+            assert!(allocation.is_ok(), "Small allocation should succeed");
+
+            let final_pages = unsafe { fsb.lock().memory_type_info.as_ref().number_of_pages };
+            let allocated_pages = final_pages - initial_pages;
+
+            let min_expansion_pages = uefi_size_to_pages!(MIN_EXPANSION) as u32;
+
+            assert_eq!(
+                allocated_pages,
+                min_expansion_pages,
+                "Allocated {:#x} pages ({:#x} bytes) for a {:#x} byte request.",
+                allocated_pages,
+                (allocated_pages as usize) * UEFI_PAGE_SIZE,
+                small_layout.size()
+            );
+        });
+    }
+
+    /// Demonstrates that with pre-existing memory regions, small allocations
+    /// use the existing memory instead of triggering MIN_EXPANSION.
+    #[test]
+    fn test_small_allocation_uses_existing_memory() {
+        with_locked_state(|| {
+            static GCD: SpinLockedGcd = SpinLockedGcd::new(None);
+
+            init_gcd(&GCD, 0x800000);
+
+            // Create an allocator for ACPI Reclaim memory (uses 4KB granularity)
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
+                &GCD,
+                DUMMY_HANDLE,
+                memory_type_info(efi::ACPI_RECLAIM_MEMORY),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+            );
+
+            // Pre-poulatee the allocator with a small existing region
+            let existing_region_size = 0x20000;
+            let existing_region_addr = GCD
+                .allocate_memory_space(
+                    DEFAULT_ALLOCATION_STRATEGY,
+                    GcdMemoryType::SystemMemory,
+                    UEFI_PAGE_SHIFT,
+                    existing_region_size,
+                    DUMMY_HANDLE,
+                    None,
+                )
+                .unwrap();
+
+            // Expand the allocator with this pre-existing region
+            let existing_region = NonNull::slice_from_raw_parts(
+                NonNull::new(existing_region_addr as *mut u8).unwrap(),
+                existing_region_size,
+            );
+            fsb.lock().expand(existing_region).expect("Should expand with existing region");
+
+            let initial_pages = unsafe { fsb.lock().memory_type_info.as_ref().number_of_pages };
+
+            // Allocate 292 bytes
+            let small_layout = Layout::from_size_align(292, 8).unwrap();
+            let allocation = fsb.allocate(small_layout);
+            assert!(allocation.is_ok(), "Small allocation should succeed");
+
+            let final_pages = unsafe { fsb.lock().memory_type_info.as_ref().number_of_pages };
+            let allocated_pages = final_pages - initial_pages;
+
+            assert_eq!(
+                allocated_pages,
+                0,
+                "Allocated {:#x} new pages for {:#x} byte request.",
+                allocated_pages,
+                small_layout.size()
+            );
+        });
+    }
 }
