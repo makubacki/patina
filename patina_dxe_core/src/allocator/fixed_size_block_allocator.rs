@@ -49,15 +49,27 @@ pub enum FixedSizeBlockAllocatorError {
     InvalidExpansion,
 }
 
-/// Minimum expansion size - allocator will request at least this much memory
-/// from the underlying GCD instance expansion is needed.
-pub const MIN_EXPANSION: usize = 0x100000;
+/// Minimum expansion size for higher traffic allocators, we use a larger minimum expansion to reduce
+/// the number of expansions required over time.
+pub const HIGH_TRAFFIC_ALLOC_MIN_EXPANSION: usize = 0x100000;
+/// Minimum expansion size for lower traffic allocators, we use a smaller minimum expansion to reduce
+/// memory consumption.
+pub const LOW_TRAFFIC_ALLOC_MIN_EXPANSION: usize = super::RUNTIME_PAGE_ALLOCATION_GRANULARITY;
 const ALIGNMENT: usize = 0x1000;
 
 const BLOCK_SIZES: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 
-// Compile-time check to ensure the MIN_EXPANSION is a multiple of RUNTIME_PAGE_ALLOCATION_GRANULARITY.
-const _: () = assert!(MIN_EXPANSION.is_multiple_of(super::RUNTIME_PAGE_ALLOCATION_GRANULARITY));
+// Compile-time checks to ensure the MIN_EXPANSION values are multiples of RUNTIME_PAGE_ALLOCATION_GRANULARITY.
+const _: () = assert!(HIGH_TRAFFIC_ALLOC_MIN_EXPANSION.is_multiple_of(super::RUNTIME_PAGE_ALLOCATION_GRANULARITY));
+const _: () = assert!(LOW_TRAFFIC_ALLOC_MIN_EXPANSION.is_multiple_of(super::RUNTIME_PAGE_ALLOCATION_GRANULARITY));
+
+/// Returns the minimum expansion size for a given memory type.
+const fn min_expansion_for_memory_type(memory_type: efi::MemoryType) -> usize {
+    match memory_type {
+        efi::BOOT_SERVICES_DATA => HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
+        _ => LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
+    }
+}
 
 // Returns the index in the block list for the minimum size block that will
 // satisfy allocation for the given layout
@@ -767,9 +779,10 @@ unsafe impl Allocator for SpinLockedFixedSizeBlockAllocator {
                 const _: () = assert!(ALIGNMENT.is_multiple_of(align_of::<AllocatorListNode>()));
                 const _: () = assert!(ALIGNMENT.is_multiple_of(UEFI_PAGE_SIZE) && ALIGNMENT > 0);
 
-                // As a matter of policy, allocate at least `MIN_EXPANSION` memory and ensure the size is
-                // aligned to `ALIGNMENT`.
-                let mut allocation_size = max(additional_mem_required, MIN_EXPANSION);
+                // As a matter of policy, allocate at least the minimum expansion amount of memory and ensure the
+                // size is aligned to `ALIGNMENT`.
+                let mut allocation_size =
+                    max(additional_mem_required, min_expansion_for_memory_type(self.lock().memory_type()));
                 let required_alignment = self.lock().page_allocation_granularity;
 
                 // Ensure that the requested number of pages is a multiple of the granularity
@@ -973,7 +986,7 @@ mod tests {
                 let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::RUNTIME_SERVICES_DATA), granularity);
                 assert!(fsb.allocators.is_none());
 
-                let allocation_size = MIN_EXPANSION;
+                let allocation_size = LOW_TRAFFIC_ALLOC_MIN_EXPANSION;
 
                 // Allocate one page to expand by
                 let allocated_address = GCD
@@ -1003,8 +1016,8 @@ mod tests {
                     );
                 }
 
-                //expand by larger than MIN_EXPANSION.
-                let allocation_size = MIN_EXPANSION + 0x1000;
+                //expand by larger than LOW_TRAFFIC_ALLOC_MIN_EXPANSION.
+                let allocation_size = LOW_TRAFFIC_ALLOC_MIN_EXPANSION + 0x1000;
 
                 // Allocate one page to expand by
                 let allocated_address = GCD
@@ -1054,7 +1067,7 @@ mod tests {
 
             const NUM_ALLOCATIONS: usize = 5;
 
-            let allocation_size = MIN_EXPANSION;
+            let allocation_size = HIGH_TRAFFIC_ALLOC_MIN_EXPANSION;
             for _ in 0..NUM_ALLOCATIONS {
                 fsb.expand(NonNull::slice_from_raw_parts(
                     NonNull::new(
@@ -1075,10 +1088,9 @@ mod tests {
             }
 
             assert_eq!(NUM_ALLOCATIONS, AllocatorIterator::new(fsb.allocators).count());
-            assert!(
-                AllocatorIterator::new(fsb.allocators)
-                    .all(|node| unsafe { (*node).allocator.free() == MIN_EXPANSION - size_of::<AllocatorListNode>() })
-            );
+            assert!(AllocatorIterator::new(fsb.allocators).all(|node| unsafe {
+                (*node).allocator.free() == HIGH_TRAFFIC_ALLOC_MIN_EXPANSION - size_of::<AllocatorListNode>()
+            }));
         });
     }
 
@@ -1203,21 +1215,21 @@ mod tests {
 
                 let layout = Layout::from_size_align(0x8, 0x8).unwrap();
 
-                // Expand the FSB by `MIN_EXPANSION` to fit the allocation
+                // Expand the FSB by LOW_TRAFFIC_ALLOC_MIN_EXPANSION to fit the allocation
                 fsb.expand(NonNull::slice_from_raw_parts(
                     NonNull::new(
                         GCD.allocate_memory_space(
                             DEFAULT_ALLOCATION_STRATEGY,
                             GcdMemoryType::SystemMemory,
                             UEFI_PAGE_SHIFT,
-                            MIN_EXPANSION,
+                            LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
                             DUMMY_HANDLE,
                             None,
                         )
                         .unwrap() as *mut u8,
                     )
                     .unwrap(),
-                    MIN_EXPANSION,
+                    LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
                 ))
                 .unwrap();
 
@@ -1228,7 +1240,7 @@ mod tests {
                 unsafe {
                     assert_eq!(
                         (*fsb.allocators.unwrap()).allocator.free(),
-                        MIN_EXPANSION - size_of::<AllocatorListNode>()
+                        LOW_TRAFFIC_ALLOC_MIN_EXPANSION - size_of::<AllocatorListNode>()
                     );
                 }
             });
@@ -1551,6 +1563,8 @@ mod tests {
             // Create a static GCD
             static GCD: SpinLockedGcd = SpinLockedGcd::new(None);
 
+            const TEST_MIN_EXPANSION_SIZE: usize = min_expansion_for_memory_type(efi::BOOT_SERVICES_DATA);
+
             // Allocate some space on the heap with the global allocator (std) to be used by expand().
             let _ = init_gcd(&GCD, 0x1000000);
 
@@ -1572,20 +1586,22 @@ mod tests {
             assert_eq!(stats.claimed_pages, 0);
 
             //reserve some space and check the stats.
-            fsb.reserve_memory_pages(uefi_size_to_pages!(MIN_EXPANSION * 2)).unwrap();
+            fsb.reserve_memory_pages(uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2)).unwrap();
 
             let stats = fsb.stats();
             assert_eq!(stats.pool_allocation_calls, 0);
             assert_eq!(stats.pool_free_calls, 0);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
             assert_eq!(stats.reserved_used, 0);
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 2));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
 
             //test alloc/deallocate and stats within the bucket
             let ptr = unsafe {
-                fsb.alloc(Layout::from_size_align(MIN_EXPANSION - size_of::<AllocatorListNode>(), 0x8).unwrap())
+                fsb.alloc(
+                    Layout::from_size_align(TEST_MIN_EXPANSION_SIZE - size_of::<AllocatorListNode>(), 0x8).unwrap(),
+                )
             };
 
             let stats = fsb.stats();
@@ -1594,9 +1610,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 0);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 2));
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
 
             unsafe {
                 fsb.dealloc(ptr, Layout::from_size_align(0x100, 0x8).unwrap());
@@ -1608,12 +1624,12 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 1);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 2));
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
 
             //test alloc/deallocate and stats blowing the bucket
-            let ptr = unsafe { fsb.alloc(Layout::from_size_align(MIN_EXPANSION * 3, 0x8).unwrap()) };
+            let ptr = unsafe { fsb.alloc(Layout::from_size_align(TEST_MIN_EXPANSION_SIZE * 3, 0x8).unwrap()) };
 
             //after this allocate, the basic memory map of the FSB should look like:
             //1MB range as a result of previous pool allocation expand - available for pool allocation.
@@ -1627,12 +1643,12 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 1);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
 
             unsafe {
-                fsb.dealloc(ptr, Layout::from_size_align(MIN_EXPANSION * 3, 0x8).unwrap());
+                fsb.dealloc(ptr, Layout::from_size_align(TEST_MIN_EXPANSION_SIZE * 3, 0x8).unwrap());
             }
 
             //after this free, the basic memory map of the FSB should look like:
@@ -1646,9 +1662,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
 
             // test that a small page allocation fits in the 1MB free reserved region.
             let ptr = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x4, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1665,9 +1681,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 1);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(5));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(5));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
 
             unsafe {
                 fsb.free_pages(ptr as *mut u8 as usize, 0x4).unwrap();
@@ -1684,9 +1700,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 1);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
 
             //test that a lage page allocation results in more claimed pages.
             let ptr = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x104, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1703,9 +1719,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 2);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1 + 0x104);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1 + 0x104);
 
             // test that a small page allocation fits in the 1MB free reserved region.
             let ptr1 = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x4, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1723,9 +1739,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 3);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(5));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1 + 0x104);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(5));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1 + 0x104);
 
             unsafe {
                 fsb.free_pages(ptr1 as *mut u8 as usize, 0x4).unwrap();
@@ -1745,9 +1761,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 3);
             assert_eq!(stats.page_free_calls, 3);
-            assert_eq!(stats.reserved_size, MIN_EXPANSION * 2);
-            assert_eq!(stats.reserved_used, MIN_EXPANSION + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(MIN_EXPANSION * 5) + 1);
+            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
+            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
+            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
         });
     }
 
@@ -1773,14 +1789,14 @@ mod tests {
                                 DEFAULT_ALLOCATION_STRATEGY,
                                 GcdMemoryType::SystemMemory,
                                 UEFI_PAGE_SHIFT,
-                                MIN_EXPANSION,
+                                LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
                                 DUMMY_HANDLE,
                                 None,
                             )
                             .unwrap() as *mut u8,
                         )
                         .unwrap(),
-                        MIN_EXPANSION,
+                        LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
                     ))
                     .unwrap();
                 }
