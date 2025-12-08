@@ -88,7 +88,7 @@ impl MemoryManager for CoreMemoryManager {
     fn get_allocator(&self, memory_type: EfiMemoryType) -> Result<&'static dyn core::alloc::Allocator, MemoryError> {
         let allocator =
             crate::allocator::core_get_allocator(memory_type.into()).map_err(|_| MemoryError::UnsupportedMemoryType)?;
-        Ok(allocator as &'static dyn core::alloc::Allocator)
+        Ok(allocator.as_allocator())
     }
 
     unsafe fn set_page_attributes(

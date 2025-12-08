@@ -14,8 +14,9 @@ mod uefi_allocator;
 mod usage_tests;
 
 use core::{
+    alloc::{Allocator, GlobalAlloc},
     ffi::c_void,
-    fmt::Debug,
+    fmt::{Debug, Display},
     mem,
     ops::Range,
     ptr::NonNull,
@@ -35,6 +36,7 @@ use crate::{
     systemtables::EfiSystemTable,
     tpl_mutex,
 };
+pub use fixed_size_block_allocator::SpinLockedFixedSizeBlockAllocator;
 use patina::pi::{
     dxe_services::{self, GcdMemoryType, MemorySpaceDescriptor},
     hob::{self, EFiMemoryTypeInformation, Hob, HobList, MEMORY_TYPE_INFO_HOB_GUID},
@@ -49,8 +51,31 @@ use patina::{
     uefi_size_to_pages,
 };
 
+// Type alias for a UefiAllocator with a SpinLockedFixedSizeBlockAllocator
+pub type UefiAllocatorWithFsb<const MIN_EXPANSION: usize> =
+    UefiAllocator<SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION>>;
+
+#[macro_use]
+mod macros;
+
 // Allocation Strategy when not specified by caller.
 pub const DEFAULT_ALLOCATION_STRATEGY: AllocationStrategy = AllocationStrategy::TopDown(None);
+
+/// Minimum expansion size for higher traffic allocators. A larger minimum expansion is used
+/// to reduce the number of expansions required over time.
+pub const HIGH_TRAFFIC_ALLOC_MIN_EXPANSION: usize = 0x100000;
+
+/// Minimum expansion size for lower traffic runtime allocators. A smaller minimum expansion is used
+/// to reduce memory consumption while still meeting the alignment requirements for runtime allocations.
+pub const LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION: usize = RUNTIME_PAGE_ALLOCATION_GRANULARITY;
+
+/// Minimum expansion size for lower traffic allocators. A smaller minimum expansion is used
+/// to reduce memory consumption.
+pub const LOW_TRAFFIC_ALLOC_MIN_EXPANSION: usize = UEFI_PAGE_SIZE;
+
+// Compile-time checks to ensure the MIN_EXPANSION values are multiples of RUNTIME_PAGE_ALLOCATION_GRANULARITY.
+const _: () = assert!(HIGH_TRAFFIC_ALLOC_MIN_EXPANSION.is_multiple_of(RUNTIME_PAGE_ALLOCATION_GRANULARITY));
+const _: () = assert!(LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION.is_multiple_of(RUNTIME_PAGE_ALLOCATION_GRANULARITY));
 
 // Private tracking guid used to generate new handles for allocator tracking
 // {9D1FA6E9-0C86-4F7F-A99B-DD229C9B3893}
@@ -70,60 +95,147 @@ cfg_if::cfg_if! {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct AllocationStatistics {
+    /// The number of calls to `alloc()`.
+    pub pool_allocation_calls: usize,
+
+    /// The number of calls to `dealloc()`.
+    pub pool_free_calls: usize,
+
+    /// The number of calls to allocate pages.
+    pub page_allocation_calls: usize,
+
+    /// The number of calls to free pages.
+    pub page_free_calls: usize,
+
+    /// The amount of memory set aside in the backing allocator for use by this allocator.
+    pub reserved_size: usize,
+
+    /// The amount of the memory used in the pool of memory set aside in the backing allocator for use by this allocator.
+    pub reserved_used: usize,
+
+    /// The number of pages claimed for use by this allocator.
+    pub claimed_pages: usize,
+}
+
+impl AllocationStatistics {
+    const fn new() -> Self {
+        Self {
+            pool_allocation_calls: 0,
+            pool_free_calls: 0,
+            page_allocation_calls: 0,
+            page_free_calls: 0,
+            reserved_size: 0,
+            reserved_used: 0,
+            claimed_pages: 0,
+        }
+    }
+}
+
+/// The interface needeed for an allocator used by UefiAllocator.
+pub trait PageAllocator: GlobalAlloc + Allocator + Display + Sync + Send {
+    /// Allocates the given number of pages according to the allocation strategy.
+    fn allocate_pages(
+        &self,
+        allocation_strategy: AllocationStrategy,
+        pages: usize,
+        alignment: usize,
+    ) -> Result<NonNull<[u8]>, EfiError>;
+
+    /// Frees the block of pages at the given address.
+    ///
+    /// ## Safety
+    /// Caller must ensure the address corresponds to a valid block allocated with [`Self::allocate_pages`].
+    unsafe fn free_pages(&self, address: usize, pages: usize) -> Result<(), EfiError>;
+
+    /// Reserves a range of memory for this allocator.
+    fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError>;
+
+    /// Returns an iterator over the memory ranges managed by this allocator.
+    fn get_memory_ranges(&self) -> alloc::vec::IntoIter<Range<usize>>;
+
+    /// Indicates whether the given pointer falls within a memory region managed by this allocator.
+    fn contains(&self, ptr: NonNull<u8>) -> bool;
+
+    /// Returns the allocator handle associated with this allocator.
+    fn handle(&self) -> efi::Handle;
+
+    /// Returns the reserved memory range, if any.
+    fn reserved_range(&self) -> Option<Range<efi::PhysicalAddress>>;
+
+    /// Returns allocation statistics for this allocator.
+    fn stats(&self) -> AllocationStatistics;
+
+    /// Resets allocator state for testing purposes.
+    #[cfg(test)]
+    fn reset(&self);
+}
+
 // The boot services data allocator is special as it is used as the GlobalAllocator instance for the DXE Rust core.
 // This means that any rust heap allocations (e.g. Box::new()) will come from this allocator unless explicitly directed
 // to a different allocator. This allocator does not need to be public since all dynamic allocations will implicitly
 // allocate from it.
 #[cfg_attr(target_os = "uefi", global_allocator)]
-pub(crate) static EFI_BOOT_SERVICES_DATA_ALLOCATOR: UefiAllocator = UefiAllocator::new(
-    &GCD,
-    NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
-    protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE,
-    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-);
+pub(crate) static EFI_BOOT_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb<HIGH_TRAFFIC_ALLOC_MIN_EXPANSION> =
+    UefiAllocator::new(
+        SpinLockedFixedSizeBlockAllocator::new(
+            &GCD,
+            protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE,
+            NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+            DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+        ),
+        efi::BOOT_SERVICES_DATA,
+    );
 
 // The following allocators are directly used by the core. These allocators are declared static so that they can easily
 // be used in the core without e.g. the overhead of acquiring a lock to retrieve them from the allocator map that all
 // the other allocators use.
-pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocator = UefiAllocator::new(
-    &GCD,
-    NonNull::from_ref(GCD.memory_type_info(efi::LOADER_CODE)),
-    protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE,
-    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION> = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::LOADER_CODE)),
+        DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+    ),
+    efi::LOADER_CODE,
 );
 
-pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocator = UefiAllocator::new(
-    &GCD,
-    NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_CODE)),
-    protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE,
-    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-);
-
-// This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
-// passed in
-pub static EFI_RUNTIME_SERVICES_CODE_ALLOCATOR: UefiAllocator = UefiAllocator::new(
-    &GCD,
-    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_CODE)),
-    protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE,
-    RUNTIME_PAGE_ALLOCATION_GRANULARITY,
+pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION> = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_CODE)),
+        DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+    ),
+    efi::BOOT_SERVICES_CODE,
 );
 
 // This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
 // passed in
-pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocator = UefiAllocator::new(
-    &GCD,
-    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
-    protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE,
-    RUNTIME_PAGE_ALLOCATION_GRANULARITY,
-);
+pub static EFI_RUNTIME_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION> =
+    UefiAllocator::new(
+        SpinLockedFixedSizeBlockAllocator::new(
+            &GCD,
+            protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE,
+            NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_CODE)),
+            RUNTIME_PAGE_ALLOCATION_GRANULARITY,
+        ),
+        efi::RUNTIME_SERVICES_CODE,
+    );
 
-static STATIC_ALLOCATORS: &[&UefiAllocator] = &[
-    &EFI_LOADER_CODE_ALLOCATOR,
-    &EFI_BOOT_SERVICES_CODE_ALLOCATOR,
-    &EFI_BOOT_SERVICES_DATA_ALLOCATOR,
-    &EFI_RUNTIME_SERVICES_CODE_ALLOCATOR,
-    &EFI_RUNTIME_SERVICES_DATA_ALLOCATOR,
-];
+// This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
+// passed in
+pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION> =
+    UefiAllocator::new(
+        SpinLockedFixedSizeBlockAllocator::new(
+            &GCD,
+            protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE,
+            NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+            RUNTIME_PAGE_ALLOCATION_GRANULARITY,
+        ),
+        efi::RUNTIME_SERVICES_DATA,
+    );
 
 fn memory_attributes_to_str(f: &mut core::fmt::Formatter<'_>, attributes: u64) -> core::fmt::Result {
     let mut attrs = Vec::new();
@@ -252,19 +364,156 @@ impl Debug for MemoryDescriptorSlice<'_> {
 /// the compatibility_mode_allowed feature flag. It is valid for other code to use this API in the absence of
 /// compatibility mode.
 pub(crate) fn get_memory_ranges_for_memory_type(memory_type: efi::MemoryType) -> Vec<Range<efi::PhysicalAddress>> {
-    for allocator in ALLOCATORS.lock().iter() {
-        if allocator.memory_type() == memory_type {
-            return allocator.get_memory_ranges().collect();
+    // Check static allocators first, then dynamic allocators
+    match_static_allocator!(memory_type, alloc => alloc.get_memory_ranges().collect(), {
+        // Check dynamic allocators
+        for allocator in ALLOCATORS.lock().iter_dynamic() {
+            if allocator.memory_type() == memory_type {
+                return allocator.get_memory_ranges();
+            }
+        }
+        Vec::new()
+    })
+}
+
+/// An allocator reference that represents a static allocator.
+#[derive(Copy, Clone)]
+pub enum AllocatorRef {
+    HighTraffic(&'static UefiAllocatorWithFsb<HIGH_TRAFFIC_ALLOC_MIN_EXPANSION>),
+    LowTraffic(&'static UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION>),
+    LowTrafficRuntime(&'static UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION>),
+}
+
+impl AllocatorRef {
+    /// Delegates to the underlying allocator's method.
+    #[inline]
+    fn allocate_pages(
+        &self,
+        allocation_strategy: AllocationStrategy,
+        pages: usize,
+        alignment: usize,
+    ) -> Result<NonNull<[u8]>, EfiError> {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.allocate_pages(allocation_strategy, pages, alignment),
+            AllocatorRef::LowTraffic(a) => a.allocate_pages(allocation_strategy, pages, alignment),
+            AllocatorRef::LowTrafficRuntime(a) => a.allocate_pages(allocation_strategy, pages, alignment),
         }
     }
-    Vec::new()
+
+    /// Delegates to the underlying allocator's method.
+    ///
+    /// ## Safety
+    /// Caller must ensure the address corresponds to a valid block allocated with [`allocate_pages`].
+    #[inline]
+    unsafe fn free_pages(&self, address: usize, pages: usize) -> Result<(), EfiError> {
+        match self {
+            AllocatorRef::HighTraffic(a) => unsafe { a.free_pages(address, pages) },
+            AllocatorRef::LowTraffic(a) => unsafe { a.free_pages(address, pages) },
+            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.free_pages(address, pages) },
+        }
+    }
+
+    /// Delegates to the underlying allocator's method.
+    #[inline]
+    unsafe fn allocate_pool(&self, size: usize, buffer: *mut *mut c_void) -> Result<(), EfiError> {
+        match self {
+            AllocatorRef::HighTraffic(a) => unsafe { a.allocate_pool(size, buffer) },
+            AllocatorRef::LowTraffic(a) => unsafe { a.allocate_pool(size, buffer) },
+            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.allocate_pool(size, buffer) },
+        }
+    }
+
+    /// Delegates to the underlying allocator's method.
+    ///
+    /// ## Safety
+    /// Caller must ensure buffer is a valid pointer to a pool allocation.
+    #[inline]
+    unsafe fn free_pool(&self, buffer: *mut c_void) -> Result<(), EfiError> {
+        match self {
+            AllocatorRef::HighTraffic(a) => unsafe { a.free_pool(buffer) },
+            AllocatorRef::LowTraffic(a) => unsafe { a.free_pool(buffer) },
+            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.free_pool(buffer) },
+        }
+    }
+
+    /// Returns the allocator handle.
+    #[inline]
+    fn handle(&self) -> efi::Handle {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.handle(),
+            AllocatorRef::LowTraffic(a) => a.handle(),
+            AllocatorRef::LowTrafficRuntime(a) => a.handle(),
+        }
+    }
+
+    /// Returns the memory type.
+    #[inline]
+    fn memory_type(&self) -> efi::MemoryType {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.memory_type(),
+            AllocatorRef::LowTraffic(a) => a.memory_type(),
+            AllocatorRef::LowTrafficRuntime(a) => a.memory_type(),
+        }
+    }
+
+    /// Returns memory ranges. Note: This collects into a Vec to enable returning from match arms.
+    #[inline]
+    fn get_memory_ranges(&self) -> Vec<Range<efi::PhysicalAddress>> {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.get_memory_ranges().collect(),
+            AllocatorRef::LowTraffic(a) => a.get_memory_ranges().collect(),
+            AllocatorRef::LowTrafficRuntime(a) => a.get_memory_ranges().collect(),
+        }
+    }
+
+    /// Reserves a range of memory for this allocator.
+    #[inline]
+    fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError> {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.reserve_memory_pages(pages),
+            AllocatorRef::LowTraffic(a) => a.reserve_memory_pages(pages),
+            AllocatorRef::LowTrafficRuntime(a) => a.reserve_memory_pages(pages),
+        }
+    }
+
+    /// Returns the reserved memory range, if any.
+    #[inline]
+    #[allow(dead_code)]
+    fn reserved_range(&self) -> Option<Range<efi::PhysicalAddress>> {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.reserved_range(),
+            AllocatorRef::LowTraffic(a) => a.reserved_range(),
+            AllocatorRef::LowTrafficRuntime(a) => a.reserved_range(),
+        }
+    }
+
+    /// Returns allocation statistics for this allocator.
+    #[inline]
+    #[allow(dead_code)]
+    fn stats(&self) -> AllocationStatistics {
+        match self {
+            AllocatorRef::HighTraffic(a) => a.stats(),
+            AllocatorRef::LowTraffic(a) => a.stats(),
+            AllocatorRef::LowTrafficRuntime(a) => a.stats(),
+        }
+    }
+
+    /// Returns a reference to this allocator as a trait object implementing `core::alloc::Allocator`.
+    #[inline]
+    pub fn as_allocator(self) -> &'static dyn Allocator {
+        match self {
+            AllocatorRef::HighTraffic(a) => a as &'static dyn Allocator,
+            AllocatorRef::LowTraffic(a) => a as &'static dyn Allocator,
+            AllocatorRef::LowTrafficRuntime(a) => a as &'static dyn Allocator,
+        }
+    }
 }
 
 // The following structure is used to track additional allocators that are created in response to allocation requests
-// that are not satisfied by the static allocators.
+// that are not satisfied by the static allocators. All dynamic allocators use LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION.
 static ALLOCATORS: tpl_mutex::TplMutex<AllocatorMap> = AllocatorMap::new();
 struct AllocatorMap {
-    map: BTreeMap<efi::MemoryType, &'static UefiAllocator>,
+    map: BTreeMap<efi::MemoryType, AllocatorRef>,
 }
 
 impl AllocatorMap {
@@ -274,9 +523,21 @@ impl AllocatorMap {
 }
 
 impl AllocatorMap {
-    // Returns an iterator that returns references to the static allocators followed by the custom allocators.
-    fn iter(&self) -> impl Iterator<Item = &'static UefiAllocator> {
-        STATIC_ALLOCATORS.iter().copied().chain(self.map.values().copied())
+    // Returns an iterator that yields allocator references.
+    fn iter_dynamic(&self) -> impl Iterator<Item = AllocatorRef> + '_ {
+        self.map.values().copied()
+    }
+
+    // Returns an iterator that checks all allocators by handle.
+    fn find_memory_type_by_handle(&self, handle: efi::Handle) -> Option<efi::MemoryType> {
+        // Check static allocators first, then dynamic allocators
+        let _ = for_each_static_allocator!(alloc => {
+            if alloc.handle() == handle {
+                return Some(alloc.memory_type());
+            }
+            false
+        });
+        self.iter_dynamic().find(|x| x.handle() == handle).map(|x| x.memory_type())
     }
 
     // Retrieves an allocator for the given memory type, creating one if it doesn't already exist.
@@ -293,24 +554,34 @@ impl AllocatorMap {
         &mut self,
         memory_type: efi::MemoryType,
         handle: efi::Handle,
-    ) -> Result<&'static UefiAllocator, EfiError> {
-        if let Some(allocator) = STATIC_ALLOCATORS.iter().find(|x| x.memory_type() == memory_type) {
-            return Ok(allocator);
+    ) -> Result<AllocatorRef, EfiError> {
+        // Check static allocators first, then dynamic allocators
+        match memory_type {
+            efi::BOOT_SERVICES_DATA => Ok(AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR)),
+            efi::LOADER_CODE | efi::BOOT_SERVICES_CODE => Ok(AllocatorRef::LowTraffic(match memory_type {
+                efi::LOADER_CODE => &EFI_LOADER_CODE_ALLOCATOR,
+                efi::BOOT_SERVICES_CODE => &EFI_BOOT_SERVICES_CODE_ALLOCATOR,
+                _ => unreachable!(),
+            })),
+            efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA => {
+                Ok(AllocatorRef::LowTrafficRuntime(match memory_type {
+                    efi::RUNTIME_SERVICES_CODE => &EFI_RUNTIME_SERVICES_CODE_ALLOCATOR,
+                    efi::RUNTIME_SERVICES_DATA => &EFI_RUNTIME_SERVICES_DATA_ALLOCATOR,
+                    _ => unreachable!(),
+                }))
+            }
+            _ => Ok(self.get_or_create_dynamic_allocator(memory_type, handle)),
         }
-        Ok(self.get_or_create_dynamic_allocator(memory_type, handle))
     }
 
     // retrieves a dynamic allocator from the map and creates a new one with the given handle if it doesn't exist.
+    // All dynamic allocators use LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION.
     // See note on `handle` in [`get_or_create_allocator`]
-    fn get_or_create_dynamic_allocator(
-        &mut self,
-        memory_type: efi::MemoryType,
-        handle: efi::Handle,
-    ) -> &'static UefiAllocator {
+    fn get_or_create_dynamic_allocator(&mut self, memory_type: efi::MemoryType, handle: efi::Handle) -> AllocatorRef {
         // the lock ensures exclusive access to the map, but an allocator may have been created already; so only create
         // the allocator if it doesn't yet exist for this memory type. MAT callbacks are only needed for Runtime
         // Services Code and Data, which are static allocators, so we can always do None here
-        self.map.entry(memory_type).or_insert_with(|| {
+        *self.map.entry(memory_type).or_insert_with(|| {
             let granularity = match memory_type {
                 efi::RESERVED_MEMORY_TYPE
                 | efi::RUNTIME_SERVICES_CODE
@@ -328,14 +599,30 @@ impl AllocatorMap {
                 NonNull::from_ref(Box::leak(Box::new(EFiMemoryTypeInformation { memory_type, number_of_pages: 0 })))
             };
 
-            Box::leak(Box::new(UefiAllocator::new(&GCD, memory_type_info, handle, granularity)))
+            AllocatorRef::LowTrafficRuntime(Box::leak(Box::new(UefiAllocator::new(
+                SpinLockedFixedSizeBlockAllocator::new(&GCD, handle, memory_type_info, granularity),
+                memory_type,
+            ))))
         })
     }
 
     // retrieves an allocator if it exists
     #[cfg(test)]
-    fn get_allocator(&self, memory_type: efi::MemoryType) -> Option<&UefiAllocator> {
-        self.iter().find(|x| x.memory_type() == memory_type)
+    fn get_allocator(&self, memory_type: efi::MemoryType) -> Option<AllocatorRef> {
+        match memory_type {
+            efi::BOOT_SERVICES_DATA => return Some(AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR)),
+            efi::LOADER_CODE => return Some(AllocatorRef::LowTraffic(&EFI_LOADER_CODE_ALLOCATOR)),
+            efi::BOOT_SERVICES_CODE => return Some(AllocatorRef::LowTraffic(&EFI_BOOT_SERVICES_CODE_ALLOCATOR)),
+            efi::RUNTIME_SERVICES_CODE => {
+                return Some(AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR));
+            }
+            efi::RUNTIME_SERVICES_DATA => {
+                return Some(AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR));
+            }
+            _ => {}
+        }
+
+        self.iter_dynamic().find(|x| x.memory_type() == memory_type)
     }
 
     //Returns a handle for the given memory type.
@@ -354,6 +641,8 @@ impl AllocatorMap {
             efi::LOADER_DATA => Ok(protocol_db::EFI_LOADER_DATA_ALLOCATOR_HANDLE),
             efi::BOOT_SERVICES_CODE => Ok(protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE),
             efi::BOOT_SERVICES_DATA => Ok(protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE),
+            efi::RUNTIME_SERVICES_CODE => Ok(protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE),
+            efi::RUNTIME_SERVICES_DATA => Ok(protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE),
             efi::ACPI_RECLAIM_MEMORY => Ok(protocol_db::EFI_ACPI_RECLAIM_MEMORY_ALLOCATOR_HANDLE),
             efi::ACPI_MEMORY_NVS => Ok(protocol_db::EFI_ACPI_MEMORY_NVS_ALLOCATOR_HANDLE),
             // Check to see if it is an invalid type. Memory types efi::PERSISTENT_MEMORY and above to 0x6FFFFFFF are illegal.
@@ -363,7 +652,7 @@ impl AllocatorMap {
             _ => {
                 if let Some(handle) = ALLOCATORS
                     .lock()
-                    .iter()
+                    .iter_dynamic()
                     .find_map(|x| if x.memory_type() == memory_type { Some(x.handle()) } else { None })
                 {
                     return Ok(handle);
@@ -379,16 +668,17 @@ impl AllocatorMap {
     }
 
     fn memory_type_for_handle(&self, handle: efi::Handle) -> Option<efi::MemoryType> {
-        self.iter().find_map(|x| if x.handle() == handle { Some(x.memory_type()) } else { None })
+        self.find_memory_type_by_handle(handle)
     }
 
     // resets the ALLOCATOR map to empty and resets the static allocators.
     #[cfg(test)]
     unsafe fn reset(&mut self) {
         self.map.clear();
-        for allocator in STATIC_ALLOCATORS.iter() {
-            allocator.reset();
-        }
+        let _ = for_each_static_allocator!(alloc => {
+            alloc.reset();
+            false
+        });
     }
 }
 
@@ -443,7 +733,9 @@ pub fn core_free_pool(buffer: *mut c_void) -> Result<(), EfiError> {
     }
     let allocators = ALLOCATORS.lock();
     unsafe {
-        if allocators.iter().any(|allocator| allocator.free_pool(buffer).is_ok()) {
+        if for_each_static_allocator!(alloc => alloc.free_pool(buffer).is_ok())
+            || allocators.iter_dynamic().any(|allocator| allocator.free_pool(buffer).is_ok())
+        {
             Ok(())
         } else {
             Err(EfiError::InvalidParameter)
@@ -524,7 +816,7 @@ pub fn core_allocate_pages(
     res
 }
 
-pub fn core_get_allocator(memory_type: efi::MemoryType) -> Result<&'static UefiAllocator, EfiError> {
+pub fn core_get_allocator(memory_type: efi::MemoryType) -> Result<AllocatorRef, EfiError> {
     let handle = AllocatorMap::handle_for_memory_type(memory_type)?;
     ALLOCATORS.lock().get_or_create_allocator(memory_type, handle)
 }
@@ -555,7 +847,9 @@ pub fn core_free_pages(memory: efi::PhysicalAddress, pages: usize) -> Result<(),
     let mut memory_type = efi::CONVENTIONAL_MEMORY;
 
     let res = unsafe {
-        if allocators.iter().any(|allocator| {
+        if try_each_static_allocator!(memory_type, alloc => {
+            alloc.free_pages(memory as usize, pages)
+        }) || allocators.iter_dynamic().any(|allocator| {
             memory_type = allocator.memory_type();
             allocator.free_pages(memory as usize, pages).is_ok()
         }) {

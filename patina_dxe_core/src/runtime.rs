@@ -19,8 +19,14 @@ use patina::pi::{list_entry, protocols::runtime};
 
 struct RuntimeData {
     runtime_arch_ptr: *mut runtime::Protocol,
-    runtime_images: LinkedList<runtime::ImageEntry, &'static crate::allocator::UefiAllocator>,
-    runtime_events: LinkedList<runtime::EventEntry, &'static crate::allocator::UefiAllocator>,
+    runtime_images: LinkedList<
+        runtime::ImageEntry,
+        &'static crate::allocator::UefiAllocatorWithFsb<{ crate::allocator::LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION }>,
+    >,
+    runtime_events: LinkedList<
+        runtime::EventEntry,
+        &'static crate::allocator::UefiAllocatorWithFsb<{ crate::allocator::LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION }>,
+    >,
 }
 
 unsafe impl Sync for RuntimeData {}
