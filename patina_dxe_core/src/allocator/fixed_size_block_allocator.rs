@@ -859,6 +859,7 @@ mod tests {
         },
         gcd, test_support,
     };
+    use alloc::vec::Vec;
     use core::{alloc::GlobalAlloc, ffi::c_void, panic};
     use std::alloc::System;
 
@@ -901,6 +902,45 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn test_get_memory_ranges_returns_allocated_region() {
+        with_granularity_modulation(|granularity| {
+            with_locked_state(|| {
+                static GCD: SpinLockedGcd = SpinLockedGcd::new(None);
+
+                init_gcd(&GCD, 0x400000);
+
+                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::BOOT_SERVICES_DATA), granularity);
+
+                assert_eq!(fsb.get_memory_ranges().count(), 0);
+
+                let allocation_size = DEFAULT_PAGE_ALLOCATION_GRANULARITY;
+                let allocated_address = GCD
+                    .allocate_memory_space(
+                        DEFAULT_ALLOCATION_STRATEGY,
+                        GcdMemoryType::SystemMemory,
+                        page_shift_from_alignment(granularity).unwrap(),
+                        allocation_size,
+                        DUMMY_HANDLE,
+                        None,
+                    )
+                    .unwrap();
+
+                fsb.expand(NonNull::slice_from_raw_parts(
+                    NonNull::new(allocated_address as *mut u8).unwrap(),
+                    allocation_size,
+                ))
+                .unwrap();
+
+                let ranges: Vec<_> = fsb.get_memory_ranges().collect();
+                assert_eq!(ranges.len(), 1);
+
+                let expected_start = allocated_address as usize + size_of::<AllocatorListNode>();
+                let expected_end = expected_start + allocation_size - size_of::<AllocatorListNode>();
+                assert_eq!(ranges[0], expected_start..expected_end);
+            });
+        });
+    }
     const DUMMY_HANDLE: *mut c_void = 0xDEADBEEF as *mut c_void;
 
     #[test]

@@ -1923,6 +1923,63 @@ mod tests {
     }
 
     #[test]
+    fn allocator_ref_free_pool_high_traffic() {
+        with_locked_state(0x1000000, || {
+            let allocator = AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR);
+            let mut buffer_ptr = core::ptr::null_mut();
+
+            // Safety: allocator is valid for the duration of the test and these asserts are grouped
+            // in one block to simplify test structure.
+            unsafe {
+                assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
+                assert!(!buffer_ptr.is_null());
+                assert!(!allocator.get_memory_ranges().is_empty());
+                assert!(allocator.free_pool(buffer_ptr).is_ok());
+            }
+        });
+    }
+
+    #[test]
+    fn allocator_ref_free_pool_low_traffic() {
+        with_locked_state(0x1000000, || {
+            let allocator = AllocatorRef::LowTraffic(&EFI_BOOT_SERVICES_CODE_ALLOCATOR);
+            let mut buffer_ptr = core::ptr::null_mut();
+
+            // Safety: allocator is valid for the duration of the test and these asserts are grouped
+            // in one block to simplify test structure.
+            unsafe {
+                assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
+                assert!(!buffer_ptr.is_null());
+                assert!(!allocator.get_memory_ranges().is_empty());
+
+                let _alloc_trait = allocator.as_allocator();
+
+                assert!(allocator.free_pool(buffer_ptr).is_ok());
+            }
+        });
+    }
+
+    #[test]
+    fn allocator_ref_free_pool_low_traffic_runtime() {
+        with_locked_state(0x1000000, || {
+            let allocator = AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR);
+            let mut buffer_ptr = core::ptr::null_mut();
+
+            // Safety: allocator is valid for the duration of the test and these asserts are grouped
+            // in one block to simplify test structure.
+            unsafe {
+                assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
+                assert!(!buffer_ptr.is_null());
+                assert!(!allocator.get_memory_ranges().is_empty());
+
+                let _alloc_trait = allocator.as_allocator();
+
+                assert!(allocator.free_pool(buffer_ptr).is_ok());
+            }
+        });
+    }
+
+    #[test]
     fn allocate_pages_should_allocate_pages() {
         with_locked_state(0x1000000, || {
             //test test null memory pointer fails with invalid param.
@@ -2280,5 +2337,276 @@ mod tests {
             assert!(terminate_memory_map(map_key).is_ok());
             assert_eq!(terminate_memory_map(map_key + 1), Err(EfiError::InvalidParameter));
         });
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_single_attribute() {
+        let test_cases = vec![
+            (efi::MEMORY_UC, "UC                  "),
+            (efi::MEMORY_WC, "WC                  "),
+            (efi::MEMORY_WT, "WT                  "),
+            (efi::MEMORY_WB, "WB                  "),
+            (efi::MEMORY_UCE, "UCE                 "),
+            (efi::MEMORY_WP, "WP                  "),
+            (efi::MEMORY_RP, "RP                  "),
+            (efi::MEMORY_XP, "XP                  "),
+            (efi::MEMORY_NV, "NV                  "),
+            (efi::MEMORY_MORE_RELIABLE, "MR                  "),
+            (efi::MEMORY_RO, "RO                  "),
+            (efi::MEMORY_SP, "SP                  "),
+            (efi::MEMORY_CPU_CRYPTO, "CC                  "),
+            (efi::MEMORY_RUNTIME, "RT                  "),
+        ];
+
+        for (attribute, expected) in test_cases {
+            let result = format!(
+                "{:?}",
+                MemoryDescriptorRef(&efi::MemoryDescriptor {
+                    r#type: efi::CONVENTIONAL_MEMORY,
+                    physical_start: 0,
+                    virtual_start: 0,
+                    number_of_pages: 0,
+                    attribute,
+                })
+            );
+            assert!(result.contains(expected), "Expected '{}' in the result for attribute 0x{:X}", expected, attribute);
+        }
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_combined_attributes() {
+        let attributes = efi::MEMORY_WB | efi::MEMORY_XP | efi::MEMORY_RUNTIME;
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: attributes,
+            })
+        );
+
+        // Should contain all three attributes separated by pipes
+        assert!(result.contains("WB|XP|RT"), "Expected 'WB|XP|RT' in the result");
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_many_attributes() {
+        let attributes = efi::MEMORY_UC
+            | efi::MEMORY_WC
+            | efi::MEMORY_WT
+            | efi::MEMORY_WB
+            | efi::MEMORY_UCE
+            | efi::MEMORY_WP
+            | efi::MEMORY_RP
+            | efi::MEMORY_XP
+            | efi::MEMORY_NV
+            | efi::MEMORY_MORE_RELIABLE
+            | efi::MEMORY_RO
+            | efi::MEMORY_SP
+            | efi::MEMORY_CPU_CRYPTO
+            | efi::MEMORY_RUNTIME;
+
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: attributes,
+            })
+        );
+
+        // When attributes exceed 20 characters, fall back to the hex representation
+        // The format is {:<#20X} which is left-aligned uppercase hex with 0x prefix
+        // Just verify that the result contains the expected pattern for hex
+        assert!(
+            result.contains("0X") || result.contains("0x"),
+            "Expected hex representation in result when attributes exceed limit, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_zero_attributes() {
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: 0,
+            })
+        );
+
+        assert!(result.contains("0X") || result.contains("0x"), "Expected hex format in result for zero attributes");
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_common_runtime_attributes() {
+        let attributes = efi::MEMORY_WB | efi::MEMORY_RUNTIME | efi::MEMORY_XP;
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::RUNTIME_SERVICES_DATA,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: attributes,
+            })
+        );
+
+        assert!(result.contains("WB|XP|RT"), "Expected 'WB|XP|RT'");
+    }
+
+    #[test]
+    fn memory_type_to_str_should_format_all_standard_memory_types() {
+        let test_cases = vec![
+            (efi::RESERVED_MEMORY_TYPE, "Reserved Memory          "),
+            (efi::LOADER_CODE, "Loader Code              "),
+            (efi::LOADER_DATA, "Loader Data              "),
+            (efi::BOOT_SERVICES_CODE, "BootServicesCode         "),
+            (efi::BOOT_SERVICES_DATA, "BootServicesData         "),
+            (efi::RUNTIME_SERVICES_CODE, "RuntimeServicesCode      "),
+            (efi::RUNTIME_SERVICES_DATA, "RuntimeServicesData      "),
+            (efi::CONVENTIONAL_MEMORY, "Conventional Memory      "),
+            (efi::UNUSABLE_MEMORY, "Unusable Memory          "),
+            (efi::ACPI_RECLAIM_MEMORY, "ACPI Reclaim Memory      "),
+            (efi::ACPI_MEMORY_NVS, "ACPI Memory NVS          "),
+            (efi::MEMORY_MAPPED_IO, "Memory Mapped IO         "),
+            (efi::MEMORY_MAPPED_IO_PORT_SPACE, "Memory Mapped IO Port Space"),
+            (efi::PAL_CODE, "PAL Code                 "),
+            (efi::PERSISTENT_MEMORY, "Persistent Memory        "),
+        ];
+
+        for (memory_type, expected) in test_cases {
+            let result = format!(
+                "{:?}",
+                MemoryDescriptorRef(&efi::MemoryDescriptor {
+                    r#type: memory_type,
+                    physical_start: 0x1000,
+                    virtual_start: 0x2000,
+                    number_of_pages: 10,
+                    attribute: 0,
+                })
+            );
+
+            assert!(result.contains(expected), "Expected '{}' in result for memory type {}", expected, memory_type);
+        }
+    }
+
+    #[test]
+    fn memory_type_to_str_should_format_unknown_memory_type() {
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: 0x71234567,
+                physical_start: 0x1000,
+                virtual_start: 0x2000,
+                number_of_pages: 10,
+                attribute: 0,
+            })
+        );
+
+        assert!(result.contains("Unknown Memory Type"), "Expected 'Unknown Memory Type' for a custom memory type");
+    }
+
+    #[test]
+    fn memory_descriptor_ref_should_format_complete_descriptor() {
+        let descriptor = efi::MemoryDescriptor {
+            r#type: efi::BOOT_SERVICES_DATA,
+            physical_start: 0x100000,
+            virtual_start: 0x200000,
+            number_of_pages: 0x10,
+            attribute: efi::MEMORY_WB | efi::MEMORY_XP,
+        };
+
+        let result = format!("{:?}", MemoryDescriptorRef(&descriptor));
+
+        assert!(result.contains("BootServicesData"), "Expected 'BootServicesData' in result");
+
+        assert!(result.contains("0X") || result.contains("0x"), "Expected hex addresses in result");
+        assert!(result.contains("100000") || result.contains("0x100000"), "Expected physical start address");
+        assert!(result.contains("200000") || result.contains("0x200000"), "Expected virtual start address");
+        assert!(result.contains("WB|XP"), "Expected attributes");
+    }
+
+    #[test]
+    fn memory_descriptor_slice_should_format_multiple_descriptors() {
+        let descriptors = vec![
+            efi::MemoryDescriptor {
+                r#type: efi::LOADER_CODE,
+                physical_start: 0x1000,
+                virtual_start: 0,
+                number_of_pages: 1,
+                attribute: efi::MEMORY_WB,
+            },
+            efi::MemoryDescriptor {
+                r#type: efi::RUNTIME_SERVICES_DATA,
+                physical_start: 0x2000,
+                virtual_start: 0,
+                number_of_pages: 2,
+                attribute: efi::MEMORY_WB | efi::MEMORY_RUNTIME,
+            },
+            efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0x3000,
+                virtual_start: 0,
+                number_of_pages: 0x100,
+                attribute: efi::MEMORY_WB,
+            },
+        ];
+
+        let result = format!("{:?}", MemoryDescriptorSlice(&descriptors));
+
+        // Verify header is present
+        assert!(result.contains("Type"), "Expected 'Type' header");
+        assert!(result.contains("Physical Start"), "Expected 'Physical Start' header");
+        assert!(result.contains("Virtual Start"), "Expected 'Virtual Start' header");
+        assert!(result.contains("Number of Pages"), "Expected 'Number of Pages' header");
+        assert!(result.contains("Attributes"), "Expected 'Attributes' header");
+
+        // Verify all descriptors are present
+        assert!(result.contains("Loader Code"), "Expected 'Loader Code' in output");
+        assert!(result.contains("RuntimeServicesData"), "Expected 'RuntimeServicesData' in output");
+        assert!(result.contains("Conventional Memory"), "Expected 'Conventional Memory' in output");
+
+        // Verify attribute formatting
+        assert!(result.contains("WB|RT"), "Expected 'WB|RT' for runtime data");
+    }
+
+    #[test]
+    fn memory_attributes_to_str_should_format_boundary_length_cases() {
+        // 3 two-letter attributes + 2 pipes = 8 characters
+        let attributes = efi::MEMORY_WB | efi::MEMORY_XP | efi::MEMORY_RUNTIME;
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: attributes,
+            })
+        );
+        assert!(result.contains("WB|XP|RT"), "Expected pipe-separated attributes for short combination");
+
+        // Add more attributes to get closer to the limit (UCE is 3 chars)
+        let attributes = efi::MEMORY_UCE | efi::MEMORY_WB | efi::MEMORY_XP | efi::MEMORY_RUNTIME | efi::MEMORY_RO;
+        let result = format!(
+            "{:?}",
+            MemoryDescriptorRef(&efi::MemoryDescriptor {
+                r#type: efi::CONVENTIONAL_MEMORY,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: attributes,
+            })
+        );
+        // 3+2+2+2+2 + 4 pipes = 15 characters
+        assert!(result.contains("|"), "Expected pipe-separated format for attributes under the limit");
     }
 }

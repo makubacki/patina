@@ -85,6 +85,9 @@ impl MemoryManager for CoreMemoryManager {
         }
     }
 
+    // Coverage is turned off since this is a simple wrapper function that would necessitate
+    // complex mocking to test.
+    #[coverage(off)]
     fn get_allocator(&self, memory_type: EfiMemoryType) -> Result<&'static dyn core::alloc::Allocator, MemoryError> {
         let allocator =
             crate::allocator::core_get_allocator(memory_type.into()).map_err(|_| MemoryError::UnsupportedMemoryType)?;
