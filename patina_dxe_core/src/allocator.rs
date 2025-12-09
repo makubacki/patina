@@ -52,8 +52,7 @@ use patina::{
 };
 
 // Type alias for a UefiAllocator with a SpinLockedFixedSizeBlockAllocator
-pub type UefiAllocatorWithFsb<const MIN_EXPANSION: usize> =
-    UefiAllocator<SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION>>;
+pub type UefiAllocatorWithFsb = UefiAllocator<SpinLockedFixedSizeBlockAllocator>;
 
 #[macro_use]
 mod macros;
@@ -177,65 +176,67 @@ pub trait PageAllocator: GlobalAlloc + Allocator + Display + Sync + Send {
 // to a different allocator. This allocator does not need to be public since all dynamic allocations will implicitly
 // allocate from it.
 #[cfg_attr(target_os = "uefi", global_allocator)]
-pub(crate) static EFI_BOOT_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb<HIGH_TRAFFIC_ALLOC_MIN_EXPANSION> =
-    UefiAllocator::new(
-        SpinLockedFixedSizeBlockAllocator::new(
-            &GCD,
-            protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE,
-            NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
-            DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-        ),
-        efi::BOOT_SERVICES_DATA,
-    );
+pub(crate) static EFI_BOOT_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+        DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+        HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
+    ),
+    efi::BOOT_SERVICES_DATA,
+);
 
 // The following allocators are directly used by the core. These allocators are declared static so that they can easily
 // be used in the core without e.g. the overhead of acquiring a lock to retrieve them from the allocator map that all
 // the other allocators use.
-pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION> = UefiAllocator::new(
+pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE,
         NonNull::from_ref(GCD.memory_type_info(efi::LOADER_CODE)),
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+        LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
     efi::LOADER_CODE,
 );
 
-pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION> = UefiAllocator::new(
+pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE,
         NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_CODE)),
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+        LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
     efi::BOOT_SERVICES_CODE,
 );
 
 // This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
 // passed in
-pub static EFI_RUNTIME_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION> =
-    UefiAllocator::new(
-        SpinLockedFixedSizeBlockAllocator::new(
-            &GCD,
-            protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE,
-            NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_CODE)),
-            RUNTIME_PAGE_ALLOCATION_GRANULARITY,
-        ),
-        efi::RUNTIME_SERVICES_CODE,
-    );
+pub static EFI_RUNTIME_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_CODE)),
+        RUNTIME_PAGE_ALLOCATION_GRANULARITY,
+        LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
+    ),
+    efi::RUNTIME_SERVICES_CODE,
+);
 
 // This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
 // passed in
-pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION> =
-    UefiAllocator::new(
-        SpinLockedFixedSizeBlockAllocator::new(
-            &GCD,
-            protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE,
-            NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
-            RUNTIME_PAGE_ALLOCATION_GRANULARITY,
-        ),
-        efi::RUNTIME_SERVICES_DATA,
-    );
+pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+        RUNTIME_PAGE_ALLOCATION_GRANULARITY,
+        LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
+    ),
+    efi::RUNTIME_SERVICES_DATA,
+);
 
 fn memory_attributes_to_str(f: &mut core::fmt::Formatter<'_>, attributes: u64) -> core::fmt::Result {
     let mut attrs = Vec::new();
@@ -379,9 +380,9 @@ pub(crate) fn get_memory_ranges_for_memory_type(memory_type: efi::MemoryType) ->
 /// An allocator reference that represents a static allocator.
 #[derive(Copy, Clone)]
 pub enum AllocatorRef {
-    HighTraffic(&'static UefiAllocatorWithFsb<HIGH_TRAFFIC_ALLOC_MIN_EXPANSION>),
-    LowTraffic(&'static UefiAllocatorWithFsb<LOW_TRAFFIC_ALLOC_MIN_EXPANSION>),
-    LowTrafficRuntime(&'static UefiAllocatorWithFsb<LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION>),
+    HighTraffic(&'static UefiAllocatorWithFsb),
+    LowTraffic(&'static UefiAllocatorWithFsb),
+    LowTrafficRuntime(&'static UefiAllocatorWithFsb),
 }
 
 impl AllocatorRef {
@@ -600,7 +601,13 @@ impl AllocatorMap {
             };
 
             AllocatorRef::LowTrafficRuntime(Box::leak(Box::new(UefiAllocator::new(
-                SpinLockedFixedSizeBlockAllocator::new(&GCD, handle, memory_type_info, granularity),
+                SpinLockedFixedSizeBlockAllocator::new(
+                    &GCD,
+                    handle,
+                    memory_type_info,
+                    granularity,
+                    LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
+                ),
                 memory_type,
             ))))
         })

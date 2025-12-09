@@ -460,7 +460,7 @@ impl Display for FixedSizeBlockAllocator {
 ///
 /// Note: [SpinLockedFixedSizeBlockAllocator::alloc()] and [SpinLockedFixedSizeBlockAllocator::allocate()] will call
 /// alloc() twice when additional memory is required.
-pub struct SpinLockedFixedSizeBlockAllocator<const MIN_EXPANSION: usize> {
+pub struct SpinLockedFixedSizeBlockAllocator {
     /// The GCD instance that this allocator uses to allocate additional memory as needed.
     gcd: &'static SpinLockedGcd,
 
@@ -470,9 +470,12 @@ pub struct SpinLockedFixedSizeBlockAllocator<const MIN_EXPANSION: usize> {
 
     /// The inner allocator that is protected by a TPL mutex.
     inner: tpl_mutex::TplMutex<FixedSizeBlockAllocator>,
+
+    /// The minimum amount of memory to allocate when expanding the allocator.
+    min_expansion: usize,
 }
 
-impl<const MIN_EXPANSION: usize> SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {
+impl SpinLockedFixedSizeBlockAllocator {
     /// Creates a new empty FixedSizeBlockAllocator that will request memory from `gcd` as needed to satisfy
     /// requests.
     pub const fn new(
@@ -480,6 +483,7 @@ impl<const MIN_EXPANSION: usize> SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION
         allocator_handle: efi::Handle,
         memory_type_info: NonNull<EFiMemoryTypeInformation>,
         page_allocation_granularity: usize,
+        min_expansion: usize,
     ) -> Self {
         SpinLockedFixedSizeBlockAllocator {
             gcd,
@@ -489,6 +493,7 @@ impl<const MIN_EXPANSION: usize> SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION
                 FixedSizeBlockAllocator::new(memory_type_info, page_allocation_granularity),
                 "FsbLock",
             ),
+            min_expansion,
         }
     }
 
@@ -698,7 +703,7 @@ impl<const MIN_EXPANSION: usize> SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION
     }
 }
 
-unsafe impl<const MIN_EXPANSION: usize> GlobalAlloc for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {
+unsafe impl GlobalAlloc for SpinLockedFixedSizeBlockAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match self.allocate(layout) {
             Ok(alloc) => alloc.as_ptr() as *mut u8,
@@ -712,7 +717,7 @@ unsafe impl<const MIN_EXPANSION: usize> GlobalAlloc for SpinLockedFixedSizeBlock
     }
 }
 
-unsafe impl<const MIN_EXPANSION: usize> Allocator for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {
+unsafe impl Allocator for SpinLockedFixedSizeBlockAllocator {
     fn allocate(&self, layout: Layout) -> core::result::Result<NonNull<[u8]>, AllocError> {
         let allocation = self.lock().alloc(layout);
         match allocation {
@@ -725,7 +730,7 @@ unsafe impl<const MIN_EXPANSION: usize> Allocator for SpinLockedFixedSizeBlockAl
 
                 // As a matter of policy, allocate at least the minimum expansion amount of memory and ensure the
                 // size is aligned to `ALIGNMENT`.
-                let mut allocation_size = max(additional_mem_required, MIN_EXPANSION);
+                let mut allocation_size = max(additional_mem_required, self.min_expansion);
                 let required_alignment = self.lock().page_allocation_granularity;
 
                 // Ensure that the requested number of pages is a multiple of the granularity
@@ -791,16 +796,16 @@ unsafe impl<const MIN_EXPANSION: usize> Allocator for SpinLockedFixedSizeBlockAl
     }
 }
 
-impl<const MIN_EXPANSION: usize> Display for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {
+impl Display for SpinLockedFixedSizeBlockAllocator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.lock().fmt(f)
     }
 }
 
-unsafe impl<const MIN_EXPANSION: usize> Sync for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {}
-unsafe impl<const MIN_EXPANSION: usize> Send for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {}
+unsafe impl Sync for SpinLockedFixedSizeBlockAllocator {}
+unsafe impl Send for SpinLockedFixedSizeBlockAllocator {}
 
-impl<const MIN_EXPANSION: usize> PageAllocator for SpinLockedFixedSizeBlockAllocator<MIN_EXPANSION> {
+impl PageAllocator for SpinLockedFixedSizeBlockAllocator {
     fn allocate_pages(
         &self,
         allocation_strategy: AllocationStrategy,
@@ -908,11 +913,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 init_gcd(&GCD, 0x400000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     DUMMY_HANDLE,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let layout = Layout::from_size_align(0x8, 0x8).unwrap();
@@ -1149,11 +1155,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 let base = init_gcd(&GCD, 0x400000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let layout = Layout::from_size_align(0x1000, 0x10).unwrap();
@@ -1175,11 +1182,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 let base = init_gcd(&GCD, 0x400000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let layout = Layout::from_size_align(0x1000, 0x10).unwrap();
@@ -1246,11 +1254,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 init_gcd(&GCD, 0x400000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let layout = Layout::from_size_align(0x8, 0x8).unwrap();
@@ -1282,11 +1291,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 init_gcd(&GCD, 0x400000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let layout = Layout::from_size_align(0x8, 0x8).unwrap();
@@ -1319,10 +1329,11 @@ mod tests {
             // Allocate some space on the heap with the global allocator (std) to be used by expand().
             init_gcd(&GCD, 0x400000);
 
-            let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
                 memory_type_info(efi::BOOT_SERVICES_DATA),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
 
@@ -1342,11 +1353,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to back the test GCD.
                 let address = init_gcd(&GCD, 0x1000000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let pages = 4;
@@ -1381,11 +1393,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to back the test GCD.
                 let address = init_gcd(&GCD, 0x1000000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let target_address = (address + 0x400000 - max(8_u64 * ALIGNMENT as u64, granularity as u64))
@@ -1416,11 +1429,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to back the test GCD.
                 let address = init_gcd(&GCD, 0x1000000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let target_address = address + 0x400000 - 8 * (ALIGNMENT as u64);
@@ -1449,11 +1463,12 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to back the test GCD.
                 let address = init_gcd(&GCD, 0x1000000);
 
-                let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+                let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
                     memory_type_info(efi::RUNTIME_SERVICES_DATA),
                     granularity,
+                    DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
 
                 let target_address = address + 0x400000 - 8 * (ALIGNMENT as u64);
@@ -1482,10 +1497,11 @@ mod tests {
             let _ = init_gcd(&GCD, 0x400000);
 
             // Test commands with bad handle.
-            let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 0 as _,
                 memory_type_info(efi::BOOT_SERVICES_DATA),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
             match fsb.allocate_pages(AllocationStrategy::Address(0x1000), 5, UEFI_PAGE_SIZE) {
@@ -1493,10 +1509,11 @@ mod tests {
                 _ => panic!("Expected INVALID_PARAMETER"),
             }
 
-            let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
                 memory_type_info(efi::BOOT_SERVICES_DATA),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
 
@@ -1530,10 +1547,11 @@ mod tests {
             // Allocate some space on the heap with the global allocator (std) to be used by expand().
             let _ = init_gcd(&GCD, 0x400000);
 
-            let fsb = SpinLockedFixedSizeBlockAllocator::<DEFAULT_PAGE_ALLOCATION_GRANULARITY>::new(
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
                 memory_type_info(efi::BOOT_SERVICES_DATA),
+                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
             fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 5, UEFI_PAGE_SIZE).unwrap();
@@ -1558,11 +1576,12 @@ mod tests {
             let _ = init_gcd(&GCD, 0x1000000);
 
             // Make a fixed-sized-block allocator
-            let fsb = SpinLockedFixedSizeBlockAllocator::<HIGH_TRAFFIC_ALLOC_MIN_EXPANSION>::new(
+            let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
                 memory_type_info(efi::BOOT_SERVICES_DATA),
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+                HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
 
             let stats = fsb.stats();
