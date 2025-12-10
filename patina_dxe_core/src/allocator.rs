@@ -14,9 +14,9 @@ mod uefi_allocator;
 mod usage_tests;
 
 use core::{
-    alloc::{Allocator, GlobalAlloc},
+    alloc::Allocator,
     ffi::c_void,
-    fmt::{Debug, Display},
+    fmt::Debug,
     mem,
     ops::Range,
     ptr::NonNull,
@@ -133,7 +133,7 @@ impl AllocationStatistics {
 }
 
 /// The interface needeed for an allocator used by UefiAllocator.
-pub trait PageAllocator: GlobalAlloc + Allocator + Display + Sync + Send {
+pub trait PageAllocator {
     /// Allocates the given number of pages according to the allocation strategy.
     fn allocate_pages(
         &self,

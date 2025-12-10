@@ -34,12 +34,18 @@ struct AllocationInfo {
 /// Wraps a `PageAllocator` to provide additional UEFI-specific functionality:
 /// - Association of a particular [`r_efi::efi::MemoryType`] with the allocator
 /// - A pool implementation that allows tracking the layout and memory_type of UEFI pool allocations.
-pub struct UefiAllocator<A: PageAllocator> {
+pub struct UefiAllocator<A>
+where
+    A: PageAllocator + GlobalAlloc + Allocator + Display + Sync + Send,
+{
     allocator: A,
     memory_type: efi::MemoryType,
 }
 
-impl<A: PageAllocator> UefiAllocator<A> {
+impl<A> UefiAllocator<A>
+where
+    A: PageAllocator + GlobalAlloc + Allocator + Display + Sync + Send,
+{
     /// Creates a new UEFI allocator using the provided allocator and memory type.
     pub const fn new(allocator: A, memory_type: efi::MemoryType) -> Self {
         UefiAllocator { allocator, memory_type }
@@ -214,7 +220,10 @@ impl<A: PageAllocator> UefiAllocator<A> {
     }
 }
 
-unsafe impl<A: PageAllocator> GlobalAlloc for UefiAllocator<A> {
+unsafe impl<A> GlobalAlloc for UefiAllocator<A>
+where
+    A: PageAllocator + GlobalAlloc + Allocator + Display + Sync + Send,
+{
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         unsafe { self.allocator.alloc(layout) }
     }
@@ -223,7 +232,10 @@ unsafe impl<A: PageAllocator> GlobalAlloc for UefiAllocator<A> {
     }
 }
 
-unsafe impl<A: PageAllocator> Allocator for UefiAllocator<A> {
+unsafe impl<A> Allocator for UefiAllocator<A>
+where
+    A: PageAllocator + GlobalAlloc + Allocator + Display + Sync + Send,
+{
     fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
         self.allocator.allocate(layout)
     }
@@ -247,7 +259,10 @@ fn string_for_memory_type(memory_type: efi::MemoryType) -> &'static str {
     }
 }
 
-impl<A: PageAllocator> Display for UefiAllocator<A> {
+impl<A> Display for UefiAllocator<A>
+where
+    A: PageAllocator + GlobalAlloc + Allocator + Display + Sync + Send,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Memory Type: {}", string_for_memory_type(self.memory_type()))?;
         self.allocator.fmt(f)
