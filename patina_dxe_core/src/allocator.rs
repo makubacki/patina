@@ -14,7 +14,6 @@ mod uefi_allocator;
 mod usage_tests;
 
 use core::{
-    alloc::Allocator,
     ffi::c_void,
     fmt::Debug,
     mem,
@@ -370,151 +369,18 @@ pub(crate) fn get_memory_ranges_for_memory_type(memory_type: efi::MemoryType) ->
         // Check dynamic allocators
         for allocator in ALLOCATORS.lock().iter_dynamic() {
             if allocator.memory_type() == memory_type {
-                return allocator.get_memory_ranges();
+                return allocator.get_memory_ranges().collect();
             }
         }
         Vec::new()
     })
 }
 
-/// An allocator reference that represents a static allocator.
-#[derive(Copy, Clone)]
-pub enum AllocatorRef {
-    HighTraffic(&'static UefiAllocatorWithFsb),
-    LowTraffic(&'static UefiAllocatorWithFsb),
-    LowTrafficRuntime(&'static UefiAllocatorWithFsb),
-}
-
-impl AllocatorRef {
-    /// Delegates to the underlying allocator's method.
-    #[inline]
-    fn allocate_pages(
-        &self,
-        allocation_strategy: AllocationStrategy,
-        pages: usize,
-        alignment: usize,
-    ) -> Result<NonNull<[u8]>, EfiError> {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.allocate_pages(allocation_strategy, pages, alignment),
-            AllocatorRef::LowTraffic(a) => a.allocate_pages(allocation_strategy, pages, alignment),
-            AllocatorRef::LowTrafficRuntime(a) => a.allocate_pages(allocation_strategy, pages, alignment),
-        }
-    }
-
-    /// Delegates to the underlying allocator's method.
-    ///
-    /// ## Safety
-    /// Caller must ensure the address corresponds to a valid block allocated with [`allocate_pages`].
-    #[inline]
-    unsafe fn free_pages(&self, address: usize, pages: usize) -> Result<(), EfiError> {
-        match self {
-            AllocatorRef::HighTraffic(a) => unsafe { a.free_pages(address, pages) },
-            AllocatorRef::LowTraffic(a) => unsafe { a.free_pages(address, pages) },
-            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.free_pages(address, pages) },
-        }
-    }
-
-    /// Delegates to the underlying allocator's method.
-    #[inline]
-    unsafe fn allocate_pool(&self, size: usize, buffer: *mut *mut c_void) -> Result<(), EfiError> {
-        match self {
-            AllocatorRef::HighTraffic(a) => unsafe { a.allocate_pool(size, buffer) },
-            AllocatorRef::LowTraffic(a) => unsafe { a.allocate_pool(size, buffer) },
-            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.allocate_pool(size, buffer) },
-        }
-    }
-
-    /// Delegates to the underlying allocator's method.
-    ///
-    /// ## Safety
-    /// Caller must ensure buffer is a valid pointer to a pool allocation.
-    #[inline]
-    unsafe fn free_pool(&self, buffer: *mut c_void) -> Result<(), EfiError> {
-        match self {
-            AllocatorRef::HighTraffic(a) => unsafe { a.free_pool(buffer) },
-            AllocatorRef::LowTraffic(a) => unsafe { a.free_pool(buffer) },
-            AllocatorRef::LowTrafficRuntime(a) => unsafe { a.free_pool(buffer) },
-        }
-    }
-
-    /// Returns the allocator handle.
-    #[inline]
-    fn handle(&self) -> efi::Handle {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.handle(),
-            AllocatorRef::LowTraffic(a) => a.handle(),
-            AllocatorRef::LowTrafficRuntime(a) => a.handle(),
-        }
-    }
-
-    /// Returns the memory type.
-    #[inline]
-    fn memory_type(&self) -> efi::MemoryType {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.memory_type(),
-            AllocatorRef::LowTraffic(a) => a.memory_type(),
-            AllocatorRef::LowTrafficRuntime(a) => a.memory_type(),
-        }
-    }
-
-    /// Returns memory ranges. Note: This collects into a Vec to enable returning from match arms.
-    #[inline]
-    fn get_memory_ranges(&self) -> Vec<Range<efi::PhysicalAddress>> {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.get_memory_ranges().collect(),
-            AllocatorRef::LowTraffic(a) => a.get_memory_ranges().collect(),
-            AllocatorRef::LowTrafficRuntime(a) => a.get_memory_ranges().collect(),
-        }
-    }
-
-    /// Reserves a range of memory for this allocator.
-    #[inline]
-    fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError> {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.reserve_memory_pages(pages),
-            AllocatorRef::LowTraffic(a) => a.reserve_memory_pages(pages),
-            AllocatorRef::LowTrafficRuntime(a) => a.reserve_memory_pages(pages),
-        }
-    }
-
-    /// Returns the reserved memory range, if any.
-    #[inline]
-    #[allow(dead_code)]
-    fn reserved_range(&self) -> Option<Range<efi::PhysicalAddress>> {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.reserved_range(),
-            AllocatorRef::LowTraffic(a) => a.reserved_range(),
-            AllocatorRef::LowTrafficRuntime(a) => a.reserved_range(),
-        }
-    }
-
-    /// Returns allocation statistics for this allocator.
-    #[inline]
-    #[allow(dead_code)]
-    fn stats(&self) -> AllocationStatistics {
-        match self {
-            AllocatorRef::HighTraffic(a) => a.stats(),
-            AllocatorRef::LowTraffic(a) => a.stats(),
-            AllocatorRef::LowTrafficRuntime(a) => a.stats(),
-        }
-    }
-
-    /// Returns a reference to this allocator as a trait object implementing `core::alloc::Allocator`.
-    #[inline]
-    pub fn as_allocator(self) -> &'static dyn Allocator {
-        match self {
-            AllocatorRef::HighTraffic(a) => a as &'static dyn Allocator,
-            AllocatorRef::LowTraffic(a) => a as &'static dyn Allocator,
-            AllocatorRef::LowTrafficRuntime(a) => a as &'static dyn Allocator,
-        }
-    }
-}
-
 // The following structure is used to track additional allocators that are created in response to allocation requests
 // that are not satisfied by the static allocators. All dynamic allocators use LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION.
 static ALLOCATORS: tpl_mutex::TplMutex<AllocatorMap> = AllocatorMap::new();
 struct AllocatorMap {
-    map: BTreeMap<efi::MemoryType, AllocatorRef>,
+    map: BTreeMap<efi::MemoryType, &'static UefiAllocatorWithFsb>,
 }
 
 impl AllocatorMap {
@@ -525,7 +391,7 @@ impl AllocatorMap {
 
 impl AllocatorMap {
     // Returns an iterator that yields allocator references.
-    fn iter_dynamic(&self) -> impl Iterator<Item = AllocatorRef> + '_ {
+    fn iter_dynamic(&self) -> impl Iterator<Item = &'static UefiAllocatorWithFsb> + '_ {
         self.map.values().copied()
     }
 
@@ -555,22 +421,20 @@ impl AllocatorMap {
         &mut self,
         memory_type: efi::MemoryType,
         handle: efi::Handle,
-    ) -> Result<AllocatorRef, EfiError> {
+    ) -> Result<&'static UefiAllocatorWithFsb, EfiError> {
         // Check static allocators first, then dynamic allocators
         match memory_type {
-            efi::BOOT_SERVICES_DATA => Ok(AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR)),
-            efi::LOADER_CODE | efi::BOOT_SERVICES_CODE => Ok(AllocatorRef::LowTraffic(match memory_type {
+            efi::BOOT_SERVICES_DATA => Ok(&EFI_BOOT_SERVICES_DATA_ALLOCATOR),
+            efi::LOADER_CODE | efi::BOOT_SERVICES_CODE => Ok(match memory_type {
                 efi::LOADER_CODE => &EFI_LOADER_CODE_ALLOCATOR,
                 efi::BOOT_SERVICES_CODE => &EFI_BOOT_SERVICES_CODE_ALLOCATOR,
                 _ => unreachable!(),
-            })),
-            efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA => {
-                Ok(AllocatorRef::LowTrafficRuntime(match memory_type {
-                    efi::RUNTIME_SERVICES_CODE => &EFI_RUNTIME_SERVICES_CODE_ALLOCATOR,
-                    efi::RUNTIME_SERVICES_DATA => &EFI_RUNTIME_SERVICES_DATA_ALLOCATOR,
-                    _ => unreachable!(),
-                }))
-            }
+            }),
+            efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA => Ok(match memory_type {
+                efi::RUNTIME_SERVICES_CODE => &EFI_RUNTIME_SERVICES_CODE_ALLOCATOR,
+                efi::RUNTIME_SERVICES_DATA => &EFI_RUNTIME_SERVICES_DATA_ALLOCATOR,
+                _ => unreachable!(),
+            }),
             _ => Ok(self.get_or_create_dynamic_allocator(memory_type, handle)),
         }
     }
@@ -578,11 +442,15 @@ impl AllocatorMap {
     // retrieves a dynamic allocator from the map and creates a new one with the given handle if it doesn't exist.
     // All dynamic allocators use LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION.
     // See note on `handle` in [`get_or_create_allocator`]
-    fn get_or_create_dynamic_allocator(&mut self, memory_type: efi::MemoryType, handle: efi::Handle) -> AllocatorRef {
+    fn get_or_create_dynamic_allocator(
+        &mut self,
+        memory_type: efi::MemoryType,
+        handle: efi::Handle,
+    ) -> &'static UefiAllocatorWithFsb {
         // the lock ensures exclusive access to the map, but an allocator may have been created already; so only create
         // the allocator if it doesn't yet exist for this memory type. MAT callbacks are only needed for Runtime
         // Services Code and Data, which are static allocators, so we can always do None here
-        *self.map.entry(memory_type).or_insert_with(|| {
+        self.map.entry(memory_type).or_insert_with(|| {
             let granularity = match memory_type {
                 efi::RESERVED_MEMORY_TYPE
                 | efi::RUNTIME_SERVICES_CODE
@@ -600,7 +468,7 @@ impl AllocatorMap {
                 NonNull::from_ref(Box::leak(Box::new(EFiMemoryTypeInformation { memory_type, number_of_pages: 0 })))
             };
 
-            AllocatorRef::LowTrafficRuntime(Box::leak(Box::new(UefiAllocator::new(
+            Box::leak(Box::new(UefiAllocator::new(
                 SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     handle,
@@ -609,23 +477,21 @@ impl AllocatorMap {
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 ),
                 memory_type,
-            ))))
-        })
+            )))
+        });
+
+        self.map.get(&memory_type).copied().expect("an allocator is expected to exist after insertion")
     }
 
     // retrieves an allocator if it exists
     #[cfg(test)]
-    fn get_allocator(&self, memory_type: efi::MemoryType) -> Option<AllocatorRef> {
+    fn get_allocator(&self, memory_type: efi::MemoryType) -> Option<&'static UefiAllocatorWithFsb> {
         match memory_type {
-            efi::BOOT_SERVICES_DATA => return Some(AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR)),
-            efi::LOADER_CODE => return Some(AllocatorRef::LowTraffic(&EFI_LOADER_CODE_ALLOCATOR)),
-            efi::BOOT_SERVICES_CODE => return Some(AllocatorRef::LowTraffic(&EFI_BOOT_SERVICES_CODE_ALLOCATOR)),
-            efi::RUNTIME_SERVICES_CODE => {
-                return Some(AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR));
-            }
-            efi::RUNTIME_SERVICES_DATA => {
-                return Some(AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR));
-            }
+            efi::BOOT_SERVICES_DATA => return Some(&EFI_BOOT_SERVICES_DATA_ALLOCATOR),
+            efi::LOADER_CODE => return Some(&EFI_LOADER_CODE_ALLOCATOR),
+            efi::BOOT_SERVICES_CODE => return Some(&EFI_BOOT_SERVICES_CODE_ALLOCATOR),
+            efi::RUNTIME_SERVICES_CODE => return Some(&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR),
+            efi::RUNTIME_SERVICES_DATA => return Some(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR),
             _ => {}
         }
 
@@ -823,7 +689,7 @@ pub fn core_allocate_pages(
     res
 }
 
-pub fn core_get_allocator(memory_type: efi::MemoryType) -> Result<AllocatorRef, EfiError> {
+pub fn core_get_allocator(memory_type: efi::MemoryType) -> Result<&'static UefiAllocatorWithFsb, EfiError> {
     let handle = AllocatorMap::handle_for_memory_type(memory_type)?;
     ALLOCATORS.lock().get_or_create_allocator(memory_type, handle)
 }
@@ -1923,9 +1789,9 @@ mod tests {
     }
 
     #[test]
-    fn allocator_ref_free_pool_high_traffic() {
+    fn allocator_free_pool_high_traffic() {
         with_locked_state(0x1000000, || {
-            let allocator = AllocatorRef::HighTraffic(&EFI_BOOT_SERVICES_DATA_ALLOCATOR);
+            let allocator = &EFI_BOOT_SERVICES_DATA_ALLOCATOR;
             let mut buffer_ptr = core::ptr::null_mut();
 
             // Safety: allocator is valid for the duration of the test and these asserts are grouped
@@ -1933,16 +1799,16 @@ mod tests {
             unsafe {
                 assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
                 assert!(!buffer_ptr.is_null());
-                assert!(!allocator.get_memory_ranges().is_empty());
+                assert!(allocator.get_memory_ranges().next().is_some());
                 assert!(allocator.free_pool(buffer_ptr).is_ok());
             }
         });
     }
 
     #[test]
-    fn allocator_ref_free_pool_low_traffic() {
+    fn allocator_free_pool_low_traffic() {
         with_locked_state(0x1000000, || {
-            let allocator = AllocatorRef::LowTraffic(&EFI_BOOT_SERVICES_CODE_ALLOCATOR);
+            let allocator = &EFI_BOOT_SERVICES_CODE_ALLOCATOR;
             let mut buffer_ptr = core::ptr::null_mut();
 
             // Safety: allocator is valid for the duration of the test and these asserts are grouped
@@ -1950,9 +1816,9 @@ mod tests {
             unsafe {
                 assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
                 assert!(!buffer_ptr.is_null());
-                assert!(!allocator.get_memory_ranges().is_empty());
+                assert!(allocator.get_memory_ranges().next().is_some());
 
-                let _alloc_trait = allocator.as_allocator();
+                let _alloc_trait: &dyn core::alloc::Allocator = allocator;
 
                 assert!(allocator.free_pool(buffer_ptr).is_ok());
             }
@@ -1960,9 +1826,9 @@ mod tests {
     }
 
     #[test]
-    fn allocator_ref_free_pool_low_traffic_runtime() {
+    fn allocator_free_pool_low_traffic_runtime() {
         with_locked_state(0x1000000, || {
-            let allocator = AllocatorRef::LowTrafficRuntime(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR);
+            let allocator = &EFI_RUNTIME_SERVICES_DATA_ALLOCATOR;
             let mut buffer_ptr = core::ptr::null_mut();
 
             // Safety: allocator is valid for the duration of the test and these asserts are grouped
@@ -1970,9 +1836,9 @@ mod tests {
             unsafe {
                 assert!(allocator.allocate_pool(0x1000, core::ptr::addr_of_mut!(buffer_ptr)).is_ok());
                 assert!(!buffer_ptr.is_null());
-                assert!(!allocator.get_memory_ranges().is_empty());
+                assert!(allocator.get_memory_ranges().next().is_some());
 
-                let _alloc_trait = allocator.as_allocator();
+                let _alloc_trait: &dyn core::alloc::Allocator = allocator;
 
                 assert!(allocator.free_pool(buffer_ptr).is_ok());
             }
