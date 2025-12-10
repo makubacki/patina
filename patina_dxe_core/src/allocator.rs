@@ -237,6 +237,14 @@ pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAlloc
     efi::RUNTIME_SERVICES_DATA,
 );
 
+pub static STATIC_ALLOCATORS: [(&UefiAllocatorWithFsb, efi::MemoryType); 5] = [
+    (&EFI_BOOT_SERVICES_DATA_ALLOCATOR, efi::BOOT_SERVICES_DATA),
+    (&EFI_LOADER_CODE_ALLOCATOR, efi::LOADER_CODE),
+    (&EFI_BOOT_SERVICES_CODE_ALLOCATOR, efi::BOOT_SERVICES_CODE),
+    (&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR, efi::RUNTIME_SERVICES_CODE),
+    (&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR, efi::RUNTIME_SERVICES_DATA),
+];
+
 fn memory_attributes_to_str(f: &mut core::fmt::Formatter<'_>, attributes: u64) -> core::fmt::Result {
     let mut attrs = Vec::new();
     let mut string_len = 0;
@@ -398,12 +406,11 @@ impl AllocatorMap {
     // Returns an iterator that checks all allocators by handle.
     fn find_memory_type_by_handle(&self, handle: efi::Handle) -> Option<efi::MemoryType> {
         // Check static allocators first, then dynamic allocators
-        let _ = for_each_static_allocator!(alloc => {
+        for (alloc, mem_type) in STATIC_ALLOCATORS.iter() {
             if alloc.handle() == handle {
-                return Some(alloc.memory_type());
+                return Some(*mem_type);
             }
-            false
-        });
+        }
         self.iter_dynamic().find(|x| x.handle() == handle).map(|x| x.memory_type())
     }
 

@@ -9,30 +9,11 @@
 /// Macro to iterate over all static allocators and execute an expression for each.
 /// Returns `true` if any allocator returns `true` from the expression.
 /// The variable `$alloc` is available in the expression and represents each allocator.
-///
-/// # Example
-/// ```ignore
-/// if for_each_static_allocator!(alloc => alloc.total_allocated() > 0) {
-///     // At least one allocator has allocated memory
-/// }
-/// ```
 #[macro_export]
 macro_rules! for_each_static_allocator {
     ($alloc:ident => $action:expr) => {{
-        ({
-            let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_DATA_ALLOCATOR;
-            $action
-        }) || ({
-            let $alloc = &$crate::allocator::EFI_LOADER_CODE_ALLOCATOR;
-            $action
-        }) || ({
-            let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_CODE_ALLOCATOR;
-            $action
-        }) || ({
-            let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR;
-            $action
-        }) || ({
-            let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR;
+        $crate::allocator::STATIC_ALLOCATORS.iter().any(|(alloc_ref, _)| {
+            let $alloc = *alloc_ref;
             $action
         })
     }};
@@ -52,39 +33,16 @@ macro_rules! for_each_static_allocator {
 #[macro_export]
 macro_rules! try_each_static_allocator {
     ($memory_type_var:ident, $alloc:ident => $action:expr) => {{
-        if {
-            let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_DATA_ALLOCATOR;
-            $action.is_ok()
-        } {
-            $memory_type_var = r_efi::efi::BOOT_SERVICES_DATA;
-            true
-        } else if {
-            let $alloc = &$crate::allocator::EFI_LOADER_CODE_ALLOCATOR;
-            $action.is_ok()
-        } {
-            $memory_type_var = r_efi::efi::LOADER_CODE;
-            true
-        } else if {
-            let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_CODE_ALLOCATOR;
-            $action.is_ok()
-        } {
-            $memory_type_var = r_efi::efi::BOOT_SERVICES_CODE;
-            true
-        } else if {
-            let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR;
-            $action.is_ok()
-        } {
-            $memory_type_var = r_efi::efi::RUNTIME_SERVICES_CODE;
-            true
-        } else if {
-            let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR;
-            $action.is_ok()
-        } {
-            $memory_type_var = r_efi::efi::RUNTIME_SERVICES_DATA;
-            true
-        } else {
-            false
+        let mut found = false;
+        for (alloc_ref, mem_type) in $crate::allocator::STATIC_ALLOCATORS.iter() {
+            let $alloc = *alloc_ref;
+            if $action.is_ok() {
+                $memory_type_var = *mem_type;
+                found = true;
+                break;
+            }
         }
+        found
     }};
 }
 
@@ -100,29 +58,18 @@ macro_rules! try_each_static_allocator {
 /// ```
 #[macro_export]
 macro_rules! match_static_allocator {
-    ($memory_type:expr, $alloc:ident => $action:expr, $fallback:expr) => {
-        match $memory_type {
-            r_efi::efi::BOOT_SERVICES_DATA => {
-                let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_DATA_ALLOCATOR;
-                $action
+    ($memory_type:expr, $alloc:ident => $action:expr, $fallback:expr) => {{
+        let mut result = None;
+        for (alloc_ref, mem_type) in $crate::allocator::STATIC_ALLOCATORS.iter() {
+            if *mem_type == $memory_type {
+                let $alloc = *alloc_ref;
+                result = Some($action);
+                break;
             }
-            r_efi::efi::LOADER_CODE => {
-                let $alloc = &$crate::allocator::EFI_LOADER_CODE_ALLOCATOR;
-                $action
-            }
-            r_efi::efi::BOOT_SERVICES_CODE => {
-                let $alloc = &$crate::allocator::EFI_BOOT_SERVICES_CODE_ALLOCATOR;
-                $action
-            }
-            r_efi::efi::RUNTIME_SERVICES_CODE => {
-                let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR;
-                $action
-            }
-            r_efi::efi::RUNTIME_SERVICES_DATA => {
-                let $alloc = &$crate::allocator::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR;
-                $action
-            }
-            _ => $fallback,
         }
-    };
+        match result {
+            Some(value) => value,
+            None => $fallback,
+        }
+    }};
 }
