@@ -195,7 +195,7 @@ pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
         protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE,
         NonNull::from_ref(GCD.memory_type_info(efi::LOADER_CODE)),
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-        LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
+        HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
     efi::LOADER_CODE,
 );
