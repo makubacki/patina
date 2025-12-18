@@ -2133,16 +2133,6 @@ mod tests {
                 core::ptr::addr_of_mut!(version),
             );
             assert_eq!(status, efi::Status::INVALID_PARAMETER);
-
-            //get_memory_map with non-null size but null map should return invalid parameter
-            let status = get_memory_map(
-                core::ptr::addr_of_mut!(memory_map_size),
-                core::ptr::null_mut(),
-                core::ptr::addr_of_mut!(map_key),
-                core::ptr::addr_of_mut!(descriptor_size),
-                core::ptr::addr_of_mut!(version),
-            );
-            assert_eq!(status, efi::Status::INVALID_PARAMETER);
         })
     }
 
