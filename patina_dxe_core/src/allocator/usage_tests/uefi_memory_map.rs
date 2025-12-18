@@ -278,14 +278,13 @@ mod tests {
             }
 
             let actual_descriptor_count = memory_map_size / descriptor_size;
-            descriptors.truncate(actual_descriptor_count);
 
             // SAFETY: get_memory_map() has successfully initialized all descriptors up to
-            // `actual_descriptor_count`. The transmute from Vec<MaybeUninit<T>> to Vec<T> is used
-            // because MaybeUninit<T> and T have the same layout, and all elements are now initialized.
-            let descriptors = unsafe {
-                mem::transmute::<Vec<mem::MaybeUninit<efi::MemoryDescriptor>>, Vec<efi::MemoryDescriptor>>(descriptors)
-            };
+            // `actual_descriptor_count`.
+            // 1. Takes the first `actual_descriptor_count` elements
+            // 2. Calls assume_init() on each to convert MaybeUninit<T> to T
+            let descriptors: Vec<efi::MemoryDescriptor> =
+                descriptors.into_iter().take(actual_descriptor_count).map(|d| unsafe { d.assume_init() }).collect();
 
             Ok(descriptors)
         }
