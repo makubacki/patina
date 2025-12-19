@@ -200,6 +200,17 @@ pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     efi::LOADER_CODE,
 );
 
+pub static EFI_LOADER_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
+    SpinLockedFixedSizeBlockAllocator::new(
+        &GCD,
+        protocol_db::EFI_LOADER_DATA_ALLOCATOR_HANDLE,
+        NonNull::from_ref(GCD.memory_type_info(efi::LOADER_DATA)),
+        DEFAULT_PAGE_ALLOCATION_GRANULARITY,
+        HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
+    ),
+    efi::LOADER_DATA,
+);
+
 pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
@@ -237,9 +248,10 @@ pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAlloc
     efi::RUNTIME_SERVICES_DATA,
 );
 
-pub static STATIC_ALLOCATORS: [(&UefiAllocatorWithFsb, efi::MemoryType); 5] = [
+pub static STATIC_ALLOCATORS: [(&UefiAllocatorWithFsb, efi::MemoryType); 6] = [
     (&EFI_BOOT_SERVICES_DATA_ALLOCATOR, efi::BOOT_SERVICES_DATA),
     (&EFI_LOADER_CODE_ALLOCATOR, efi::LOADER_CODE),
+    (&EFI_LOADER_DATA_ALLOCATOR, efi::LOADER_DATA),
     (&EFI_BOOT_SERVICES_CODE_ALLOCATOR, efi::BOOT_SERVICES_CODE),
     (&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR, efi::RUNTIME_SERVICES_CODE),
     (&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR, efi::RUNTIME_SERVICES_DATA),
@@ -432,8 +444,9 @@ impl AllocatorMap {
         // Check static allocators first, then dynamic allocators
         match memory_type {
             efi::BOOT_SERVICES_DATA => Ok(&EFI_BOOT_SERVICES_DATA_ALLOCATOR),
-            efi::LOADER_CODE | efi::BOOT_SERVICES_CODE => Ok(match memory_type {
+            efi::LOADER_CODE | efi::LOADER_DATA | efi::BOOT_SERVICES_CODE => Ok(match memory_type {
                 efi::LOADER_CODE => &EFI_LOADER_CODE_ALLOCATOR,
+                efi::LOADER_DATA => &EFI_LOADER_DATA_ALLOCATOR,
                 efi::BOOT_SERVICES_CODE => &EFI_BOOT_SERVICES_CODE_ALLOCATOR,
                 _ => unreachable!(),
             }),
@@ -496,6 +509,7 @@ impl AllocatorMap {
         match memory_type {
             efi::BOOT_SERVICES_DATA => return Some(&EFI_BOOT_SERVICES_DATA_ALLOCATOR),
             efi::LOADER_CODE => return Some(&EFI_LOADER_CODE_ALLOCATOR),
+            efi::LOADER_DATA => return Some(&EFI_LOADER_DATA_ALLOCATOR),
             efi::BOOT_SERVICES_CODE => return Some(&EFI_BOOT_SERVICES_CODE_ALLOCATOR),
             efi::RUNTIME_SERVICES_CODE => return Some(&EFI_RUNTIME_SERVICES_CODE_ALLOCATOR),
             efi::RUNTIME_SERVICES_DATA => return Some(&EFI_RUNTIME_SERVICES_DATA_ALLOCATOR),
@@ -1281,7 +1295,7 @@ mod tests {
                 },
                 &[
                     // for test, pick dynamic allocators, since state is easier to clean up for those.
-                    0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, //0x0100 pages of LOADER_DATA
+                    0x0d, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, //0x0100 pages of PAL_CODE
                     0x09, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, //0x0200 pages of ACPI_RECLAIM_MEMORY
                     0x0a, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, //0x0300 pages of ACPI_MEMORY_NVS
                 ],
@@ -1308,8 +1322,8 @@ mod tests {
 
             init_memory_support(&hob_list);
 
-            let loader_range = ALLOCATORS.lock().get_allocator(efi::LOADER_DATA).unwrap().reserved_range().unwrap();
-            assert_eq!(loader_range.end - loader_range.start, 0x100 * 0x1000);
+            let pal_code_range = ALLOCATORS.lock().get_allocator(efi::PAL_CODE).unwrap().reserved_range().unwrap();
+            assert_eq!(pal_code_range.end - pal_code_range.start, 0x100 * 0x1000);
 
             let reclaim_range =
                 ALLOCATORS.lock().get_allocator(efi::ACPI_RECLAIM_MEMORY).unwrap().reserved_range().unwrap();
@@ -1543,6 +1557,7 @@ mod tests {
 
             for (mem_type, handle) in [
                 (efi::LOADER_CODE, protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE),
+                (efi::LOADER_DATA, protocol_db::EFI_LOADER_DATA_ALLOCATOR_HANDLE),
                 (efi::BOOT_SERVICES_CODE, protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE),
                 (efi::BOOT_SERVICES_DATA, protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE),
                 (efi::RUNTIME_SERVICES_CODE, protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE),
