@@ -20,7 +20,7 @@ name: Update Release Draft
 on:
   push:
     branches:
-      - main
+      - prevent_crate_ver_update_pr_workflow_failure_test
 
 jobs:
   draft:
