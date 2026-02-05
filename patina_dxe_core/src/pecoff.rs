@@ -73,6 +73,8 @@ pub struct UefiPeInfo {
     pub section_alignment: u32,
     /// The total length of the image header.
     pub size_of_headers: usize,
+    /// The COFF machine type (IMAGE_FILE_MACHINE_*).
+    pub machine: u16,
     /// Structs representing the section table inside the image header.
     pub sections: Vec<goblin::pe::section_table::SectionTable>,
     /// The filename, if present, from debug_data
@@ -102,6 +104,7 @@ impl UefiPeInfo {
         pe.header_type = HeaderType::Te(parsed_te.rva_offset);
         pe.entry_point_offset = parsed_te.header.entry_point as usize;
         pe.image_type = parsed_te.header.subsystem as u16;
+        pe.machine = parsed_te.header.machine;
         pe.section_alignment = 0;
         pe.size_of_headers = parsed_te.header.base_of_code as usize;
         pe.sections = parsed_te.sections;
@@ -142,6 +145,7 @@ impl UefiPeInfo {
         pe.header_type = HeaderType::Pe;
         pe.entry_point_offset = optional_header.standard_fields.address_of_entry_point as usize;
         pe.image_type = optional_header.windows_fields.subsystem;
+        pe.machine = parsed_pe.header.coff_header.machine;
         pe.section_alignment = optional_header.windows_fields.section_alignment;
         pe.size_of_image = optional_header.windows_fields.size_of_image;
         pe.sections = parsed_pe.sections.into_iter().collect();
