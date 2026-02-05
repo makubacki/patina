@@ -63,6 +63,14 @@ pub const EFI_IMAGE_SUBSYSTEM_EFI_APPLICATION: u16 = 10;
 pub const EFI_IMAGE_SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER: u16 = 11;
 pub const EFI_IMAGE_SUBSYSTEM_EFI_RUNTIME_DRIVER: u16 = 12;
 
+/// PE/COFF Specification Machine Types
+#[cfg(target_arch = "x86_64")]
+const EXPECTED_IMAGE_MACHINE: u16 = pecoff::IMAGE_MACHINE_TYPE_X64;
+#[cfg(target_arch = "aarch64")]
+const EXPECTED_IMAGE_MACHINE: u16 = pecoff::IMAGE_MACHINE_TYPE_AARCH64;
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+compile_error!("Unsupported target_arch for PE/COFF image loading");
+
 pub const ENTRY_POINT_STACK_SIZE: usize = 0x100000;
 
 // Compile time assert to make sure `STACK_ALIGNMENT` (which comes from uefi_corosensei) is never larger than
@@ -1181,6 +1189,15 @@ fn core_load_pe_image(
 
     let pe_file_name = pe_info.filename_or("Unknown");
 
+    if pe_info.machine != EXPECTED_IMAGE_MACHINE {
+        log::error!(
+            "core_load_pe_image failed: {pe_file_name} unsupported machine type {:#x?} (expected {:#x?})",
+            pe_info.machine,
+            EXPECTED_IMAGE_MACHINE
+        );
+        return Err(EfiError::Unsupported);
+    }
+
     // based on the image type, determine the correct allocator and code/data types.
     let (code_type, data_type) = match pe_info.image_type {
         EFI_IMAGE_SUBSYSTEM_EFI_APPLICATION => (efi::LOADER_CODE, efi::LOADER_DATA),
@@ -1645,6 +1662,35 @@ mod tests {
                 File::open(test_collateral!("windows_console_app.exe")).expect("failed to open test file.");
             let mut image: Vec<u8> = Vec::new();
             test_file.read_to_end(&mut image).expect("failed to read test file");
+
+            static PI_DISPATCHER: PiDispatcher<MockPlatformInfo> =
+                PiDispatcher::<MockPlatformInfo>::new(patina_ffs_extractors::NullSectionExtractor);
+            PI_DISPATCHER.init(&create_dxe_core_hob(), SYSTEM_TABLE.lock().as_mut().unwrap());
+
+            let result = PI_DISPATCHER.load_image(
+                false,
+                protocol_db::DXE_CORE_HANDLE,
+                core::ptr::null_mut(),
+                Some(image.as_slice()),
+            );
+
+            assert!(matches!(result, Err(ImageStatus::LoadError(EfiError::Unsupported))));
+        });
+    }
+
+    #[test]
+    fn load_image_should_fail_for_arch_mismatch() {
+        with_locked_state(|| {
+            let mut test_file = File::open(test_paths::RUST_IMAGE_HII_RESOURCE).expect("failed to open test file.");
+            let mut image: Vec<u8> = Vec::new();
+            test_file.read_to_end(&mut image).expect("failed to read test file");
+
+            #[cfg(target_arch = "x86_64")]
+            const MISMATCH_MACHINE: u16 = pecoff::IMAGE_MACHINE_TYPE_AARCH64;
+            #[cfg(target_arch = "aarch64")]
+            const MISMATCH_MACHINE: u16 = pecoff::IMAGE_MACHINE_TYPE_X64;
+
+            set_coff_machine(&mut image, MISMATCH_MACHINE);
 
             static PI_DISPATCHER: PiDispatcher<MockPlatformInfo> =
                 PiDispatcher::<MockPlatformInfo>::new(patina_ffs_extractors::NullSectionExtractor);
@@ -3038,6 +3084,12 @@ mod tests {
             ]),
             _ => None,
         }
+    }
+
+    fn set_coff_machine(image: &mut [u8], machine: u16) {
+        let pe_offset = u32::from_le_bytes(image[0x3C..0x40].try_into().unwrap()) as usize;
+        let machine_offset = pe_offset + 4;
+        image[machine_offset..machine_offset + 2].copy_from_slice(&machine.to_le_bytes());
     }
 
     /// Converts a string file path into a FILEPATH device path node.
