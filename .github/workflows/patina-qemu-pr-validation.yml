@@ -1,0 +1,60 @@
+# @file patina-qemu-pr-validation.yml
+#
+# A workflow that runs QEMU-based validation after CI succeeds for a pull request.
+#
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: Apache-2.0
+##
+name: Patina QEMU PR Validation
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: ["completed"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    name: Gather Incoming PR Metadata
+    if: |
+      github.repository_owner == 'OpenDevicePartnership' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    outputs:
+      pr_number: ${{ steps.pr-info.outputs.pr_number }}
+    steps:
+      - name: Get PR Information
+        id: pr-info
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          event_path = pathlib.Path(os.environ['GITHUB_EVENT_PATH'])
+          payload = json.loads(event_path.read_text(encoding='utf-8'))
+          prs = payload.get('workflow_run', {}).get('pull_requests', [])
+          if not prs:
+              raise SystemExit('No pull request found in workflow_run payload.')
+
+          pr_number = prs[0].get('number')
+          if not pr_number:
+              raise SystemExit('pull_requests[0].number is missing in workflow_run payload.')
+
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as out:
+              out.write(f'pr_number={pr_number}\n')
+          PY
+
+  qemu-pr-validation:
+    needs: [prepare]
+    if: needs.prepare.result == 'success'
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@main
+    with:
+      pr-number: ${{ fromJSON(needs.prepare.outputs.pr_number) }}
+      patina-ref: ${{ github.event.workflow_run.head_sha }}
+    secrets: inherit

@@ -1,0 +1,31 @@
+# @file patina-qemu-pr-validation-post.yml
+#
+# A workflow that runs after Patina QEMU PR Validation completes and delegates
+# post-processing to a patina-devops workflow.
+#
+# This allows a trigger in the patina repo while most of the actual implementation
+# resides in patina-devops.
+#
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: Apache-2.0
+##
+name: Patina QEMU PR Validation Post
+
+on:
+  workflow_run:
+    workflows: ["Patina QEMU PR Validation"]
+    types: ["completed"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  post-process:
+    if: |
+      github.repository_owner == 'OpenDevicePartnership' &&
+      github.event.workflow_run.event == 'pull_request'
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidationPost.yml@main
+    with:
+      triggering-run-id: ${{ fromJSON(github.event.workflow_run.id) }}
+    secrets: inherit
