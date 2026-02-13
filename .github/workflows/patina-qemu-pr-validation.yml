@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     name: Gather Incoming PR Metadata
     if: |
-      github.repository_owner == 'OpenDevicePartnership' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'
     outputs:
@@ -53,7 +52,7 @@ jobs:
   qemu-pr-validation:
     needs: [prepare]
     if: needs.prepare.result == 'success'
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@patina_plat_testing
     with:
       pr-number: ${{ fromJSON(needs.prepare.outputs.pr_number) }}
       patina-ref: ${{ github.event.workflow_run.head_sha }}

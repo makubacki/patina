@@ -23,9 +23,8 @@ permissions:
 jobs:
   post-process:
     if: |
-      github.repository_owner == 'OpenDevicePartnership' &&
       github.event.workflow_run.event == 'pull_request'
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidationPost.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidationPost.yml@patina_plat_testing
     with:
       triggering-run-id: ${{ fromJSON(github.event.workflow_run.id) }}
     secrets: inherit
