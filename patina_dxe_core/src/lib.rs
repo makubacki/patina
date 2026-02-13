@@ -627,6 +627,7 @@ fn core_display_missing_arch_protocols() {
 
 fn call_bds() -> ! {
     // Enable status code capability in Firmware Performance DXE.
+    // Test change
     match protocols::PROTOCOL_DB.locate_protocol(status_code::PROTOCOL_GUID) {
         Ok(status_code_ptr) => {
             if let Some(status_code_protocol_ptr) = NonNull::new(status_code_ptr) {
