@@ -50,6 +50,7 @@ jobs:
           PY
 
   qemu-pr-validation:
+    name: Run Patina QEMU Validation
     needs: [prepare]
     if: needs.prepare.result == 'success'
     uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@patina_plat_testing
