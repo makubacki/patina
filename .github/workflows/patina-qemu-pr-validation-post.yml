@@ -22,8 +22,6 @@ permissions:
 
 jobs:
   post-process:
-    if: |
-      github.event.workflow_run.event == 'pull_request'
     uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidationPost.yml@patina_plat_testing
     with:
       triggering-run-id: ${{ fromJSON(github.event.workflow_run.id) }}
