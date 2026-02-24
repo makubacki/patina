@@ -12,6 +12,12 @@ on:
     workflows: ["CI"]
     types: ["completed"]
 
+# Do not allow more than one instance of this workflow to run at the same
+# time for the same PR branch.
+concurrency:
+  group: qemu-pr-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   actions: read
