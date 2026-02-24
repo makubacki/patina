@@ -46,10 +46,16 @@ jobs:
           if not pr_number:
               raise SystemExit('pull_requests[0].number is missing in workflow_run payload.')
 
-          print(f'::notice::PR Number: {pr_number}')
-          print(f'::notice::PR Head SHA: {pr.get("head", {}).get("sha", "N/A")}')
-          print(f'::notice::PR Head Ref: {pr.get("head", {}).get("ref", "N/A")}')
-          print(f'::notice::PR Base Ref: {pr.get("base", {}).get("ref", "N/A")}')
+          head_sha = pr.get('head', {}).get('sha', 'N/A')
+          head_ref = pr.get('head', {}).get('ref', 'N/A')
+          base_ref = pr.get('base', {}).get('ref', 'N/A')
+          msg = '%0A'.join([
+              f'- PR Number: {pr_number}',
+              f'- Head SHA: {head_sha}',
+              f'- Head Ref: {head_ref}',
+              f'- Base Ref: {base_ref}',
+          ])
+          print(f'::notice::PR Information%0A{msg}')
 
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as out:
               out.write(f'pr_number={pr_number}\n')
