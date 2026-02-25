@@ -37,52 +37,28 @@ jobs:
         id: pr-info
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_REF: ${{ github.event.workflow_run.head_branch }}
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import urllib.request
+          owner="${HEAD_REPO%%/*}"
+          pr_number=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "$owner:$HEAD_REF" --json number --jq '.[0].number')
 
-          head_sha = os.environ.get('HEAD_SHA', '')
-          if not head_sha:
-              raise SystemExit('HEAD_SHA is not set.')
+          if [[ -z "$pr_number" ]]; then
+            echo "::error::No open PR found for head $owner:$HEAD_REF"
+            exit 1
+          fi
 
-          # Use the commits API to find the PR associated with the head SHA.
-          # This is needed for PRs from forks.
-          url = (
-              f"https://api.github.com/repos/"
-              f"{os.environ['GITHUB_REPOSITORY']}/commits/{head_sha}/pulls"
-          )
-          req = urllib.request.Request(url, headers={
-              'Accept': 'application/vnd.github+json',
-              'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
-          })
-          resp = json.loads(urllib.request.urlopen(req).read())
-          if not resp:
-              raise SystemExit(f'No PR found for commit {head_sha}.')
+          echo "::group::PR Information"
+          echo "  - PR Number: $pr_number"
+          echo "  - Head SHA:  $HEAD_SHA"
+          echo "  - Head Ref:  $HEAD_REF"
+          echo "  - Source:    $HEAD_REPO"
+          echo "::endgroup::"
 
-          pr_number = resp[0].get('number')
-          if not pr_number:
-              raise SystemExit('Unable to determine PR number.')
-
-          head_ref = os.environ.get('HEAD_REF', 'N/A')
-          repo_name = os.environ.get('HEAD_REPO', 'N/A')
-
-          print('::group::PR Information')
-          print(f'  - PR Number: {pr_number}')
-          print(f'  - Head SHA:  {head_sha}')
-          print(f'  - Head Ref:  {head_ref}')
-          print(f'  - Source:    {repo_name}')
-          print('::endgroup::')
-
-          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as out:
-              out.write(f'pr_number={pr_number}\n')
-          PY
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
   qemu-pr-validation:
     name: Run Patina QEMU Validation
