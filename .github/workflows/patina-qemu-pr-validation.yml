@@ -21,6 +21,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 jobs:
   prepare:
@@ -35,32 +36,48 @@ jobs:
       - name: Get PR Information
         id: pr-info
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REF: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           python - <<'PY'
           import json
           import os
           import pathlib
+          import urllib.request
 
-          event_path = pathlib.Path(os.environ['GITHUB_EVENT_PATH'])
-          payload = json.loads(event_path.read_text(encoding='utf-8'))
-          prs = payload.get('workflow_run', {}).get('pull_requests', [])
-          if not prs:
-              raise SystemExit('No pull request found in workflow_run payload.')
+          head_sha = os.environ.get('HEAD_SHA', '')
+          if not head_sha:
+              raise SystemExit('HEAD_SHA is not set.')
 
-          pr = prs[0]
-          pr_number = pr.get('number')
+          # Use the commits API to find the PR associated with the head SHA.
+          # This is needed for PRs from forks.
+          url = (
+              f"https://api.github.com/repos/"
+              f"{os.environ['GITHUB_REPOSITORY']}/commits/{head_sha}/pulls"
+          )
+          req = urllib.request.Request(url, headers={
+              'Accept': 'application/vnd.github+json',
+              'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
+          })
+          resp = json.loads(urllib.request.urlopen(req).read())
+          if not resp:
+              raise SystemExit(f'No PR found for commit {head_sha}.')
+
+          pr_number = resp[0].get('number')
           if not pr_number:
-              raise SystemExit('pull_requests[0].number is missing in workflow_run payload.')
+              raise SystemExit('Unable to determine PR number.')
 
-          head_sha = pr.get('head', {}).get('sha', 'N/A')
-          head_ref = pr.get('head', {}).get('ref', 'N/A')
-          base_ref = pr.get('base', {}).get('ref', 'N/A')
+          head_ref = os.environ.get('HEAD_REF', 'N/A')
+          repo_name = os.environ.get('HEAD_REPO', 'N/A')
 
           print('::group::PR Information')
           print(f'  - PR Number: {pr_number}')
           print(f'  - Head SHA:  {head_sha}')
           print(f'  - Head Ref:  {head_ref}')
-          print(f'  - Base Ref:  {base_ref}')
+          print(f'  - Source:    {repo_name}')
           print('::endgroup::')
 
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as out:
