@@ -17,10 +17,16 @@ name: CI
 
 on:
   workflow_dispatch:
-
+  push:
+    branches:
+      - main
+      - major
+      - feature/**/*
   pull_request:
     branches:
-      - patina_plat_testing
+      - main
+      - major
+      - feature/**/*
 
 # Do not allow more than one instance of this workflow to run at the same
 # time for the same PR ref (branch). Prefer head_ref but fall back to ref
@@ -34,23 +40,15 @@ concurrency:
 jobs:
   ci_workflow:
     name: Run
-    # uses: makubacki/patina-devops/.github/workflows/CiWorkflow.yml@patina_plat_testing
-    # with:
-    #   build-tasks: build,build-x64,build-aarch64
-    #   run-cargo-vet: false
-    # secrets: inherit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Do Nothing For Testing
-        run: echo "Return success to save resources and trigger the next workflow."
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/CiWorkflow.yml@v0.3.8
+    with:
+      build-tasks: build,build-x64,build-aarch64
+      run-cargo-vet: false
+    secrets: inherit
   mdbook_docs_test:
     name: Run
-    # uses: makubacki/patina-devops/.github/workflows/MdbookWorkflow.yml@patina_plat_testing
-    # with:
-    #   mdbook-path: "docs"
-    #   build-cmd: cargo make build-lib
-    # secrets: inherit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Do Nothing For Testing
-        run: echo "Return success to save resources and trigger the next workflow."
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@v0.3.8
+    with:
+      mdbook-path: "docs"
+      build-cmd: cargo make build-lib
+    secrets: inherit
