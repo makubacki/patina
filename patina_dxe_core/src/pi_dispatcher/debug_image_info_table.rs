@@ -8,6 +8,7 @@
 //!
 use core::{
     alloc::Layout,
+    fmt,
     ptr::{self, NonNull},
 };
 use r_efi::efi;
@@ -16,6 +17,30 @@ use spin::rwlock::RwLock;
 /// GUID for the EFI_DEBUG_IMAGE_INFO_TABLE per section 18.4.3 of UEFI Spec 2.11
 pub(super) const EFI_DEBUG_IMAGE_INFO_TABLE_GUID: efi::Guid =
     efi::Guid::from_fields(0x49152e77, 0x1ada, 0x4764, 0xb7, 0xa2, &[0x7a, 0xfe, 0xfe, 0xd9, 0x5e, 0x8b]);
+
+/// Error returned when growing the debug image info table fails.
+#[derive(Debug)]
+enum GrowError {
+    /// The requested layout was invalid.
+    InvalidLayout(alloc::alloc::LayoutError),
+    /// The allocator returned a null pointer.
+    AllocFailed,
+}
+
+impl fmt::Display for GrowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GrowError::InvalidLayout(e) => write!(f, "invalid layout: {e}"),
+            GrowError::AllocFailed => write!(f, "allocation returned null"),
+        }
+    }
+}
+
+impl From<alloc::alloc::LayoutError> for GrowError {
+    fn from(e: alloc::alloc::LayoutError) -> Self {
+        GrowError::InvalidLayout(e)
+    }
+}
 
 /// The type of debug image info entry.
 pub(super) enum ImageInfoType {
@@ -195,29 +220,34 @@ impl DebugImageInfoData {
     /// Doubles the current capacity of the table.
     ///
     /// If the current capacity is zero, sets it to a default initial capacity.
-    fn grow(&mut self) -> Result<(), alloc::alloc::LayoutError> {
+    fn grow(&mut self) -> Result<(), GrowError> {
         // DEFAULT_CAPACITY must always be greater than zero.
         const DEFAULT_CAPACITY: usize = 16;
         const _: () = assert!(DEFAULT_CAPACITY > 0);
 
-        let data = if self.capacity == 0 {
+        let (data, new_capacity) = if self.capacity == 0 {
             let layout = Layout::array::<EfiDebugImageInfo>(DEFAULT_CAPACITY)?;
-            self.capacity = DEFAULT_CAPACITY;
 
             // SAFETY: layout is non-zero sized due to DEFAULT_CAPACITY being non-zero
-            unsafe { alloc::alloc::alloc_zeroed(layout) }
+            let data = unsafe { alloc::alloc::alloc_zeroed(layout) };
+            (data, DEFAULT_CAPACITY)
         } else {
             let old_layout = Layout::array::<EfiDebugImageInfo>(self.capacity)?;
             let new_capacity = self.capacity * 2;
             let new_layout = Layout::array::<EfiDebugImageInfo>(new_capacity)?;
-            self.capacity = new_capacity;
             // SAFETY: layout is the same layout that was used to allocate the original buffer due to the invariants
             //   of this struct.
             // SAFETY: new_size is greater than zero due to the if branch above ensuring capacity is non-zero.
             // SAFETY: new_size does not exceed isize::MAX as the `Layout` call would have failed.
-            unsafe { alloc::alloc::realloc(self.table_mut().cast::<u8>(), old_layout, new_layout.size()) }
+            let data = unsafe { alloc::alloc::realloc(self.table_mut().cast::<u8>(), old_layout, new_layout.size()) };
+            (data, new_capacity)
         };
 
+        if data.is_null() {
+            return Err(GrowError::AllocFailed);
+        }
+
+        self.capacity = new_capacity;
         self.header.table = data as *mut EfiDebugImageInfo;
         Ok(())
     }
