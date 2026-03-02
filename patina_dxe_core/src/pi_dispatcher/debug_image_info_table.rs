@@ -18,6 +18,10 @@ use spin::rwlock::RwLock;
 pub(super) const EFI_DEBUG_IMAGE_INFO_TABLE_GUID: efi::Guid =
     efi::Guid::from_fields(0x49152e77, 0x1ada, 0x4764, 0xb7, 0xa2, &[0x7a, 0xfe, 0xfe, 0xd9, 0x5e, 0x8b]);
 
+/// Default allocation size for the debug image info table.
+const DEFAULT_CAPACITY: usize = 16;
+const _: () = assert!(DEFAULT_CAPACITY > 0);
+
 /// Error returned when growing the debug image info table fails.
 #[derive(Debug)]
 enum GrowError {
@@ -221,10 +225,6 @@ impl DebugImageInfoData {
     ///
     /// If the current capacity is zero, sets it to a default initial capacity.
     fn grow(&mut self) -> Result<(), GrowError> {
-        // DEFAULT_CAPACITY must always be greater than zero.
-        const DEFAULT_CAPACITY: usize = 16;
-        const _: () = assert!(DEFAULT_CAPACITY > 0);
-
         let (data, new_capacity) = if self.capacity == 0 {
             let layout = Layout::array::<EfiDebugImageInfo>(DEFAULT_CAPACITY)?;
 
@@ -444,20 +444,21 @@ mod tests {
 
         assert_eq!(table.header.table_size, 1);
         assert_eq!(table.len(), 1);
-        assert_eq!(table.capacity(), 16); // DEFAULT_CAPACITY
+        assert_eq!(table.capacity(), DEFAULT_CAPACITY);
     }
 
     #[test]
     fn test_add_entry_require_grow() {
         let mut table = DebugImageInfoData::new();
 
-        for i in 0..17 {
+        let count = DEFAULT_CAPACITY + 1;
+        for i in 0..count {
             table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x1000 + i) as efi::Handle);
         }
 
-        assert_eq!(table.header.table_size, 17);
-        assert_eq!(table.len(), 17);
-        assert_eq!(table.capacity(), 32); // Grew from 16 to 32
+        assert_eq!(table.header.table_size, count as u32);
+        assert_eq!(table.len(), count);
+        assert_eq!(table.capacity(), DEFAULT_CAPACITY * 2);
     }
 
     #[test]
@@ -599,5 +600,70 @@ mod tests {
             table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
             DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
         );
+    }
+
+    #[test]
+    fn test_grow_error_display_alloc_failed_msg() {
+        let error = GrowError::AllocFailed;
+        let msg = alloc::format!("{error}");
+        assert_eq!(msg, "allocation returned null");
+    }
+
+    #[test]
+    fn test_grow_error_display_invalid_layout_msg() {
+        // Note: Zero alignment will result in a LayoutError.
+        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+        let error = GrowError::InvalidLayout(layout_err);
+        let msg = alloc::format!("{error}");
+        assert!(msg.starts_with("invalid layout:"));
+    }
+
+    #[test]
+    fn test_grow_error_debug_msgs() {
+        let error = GrowError::AllocFailed;
+        let msg = alloc::format!("{error:?}");
+        assert_eq!(msg, "AllocFailed");
+
+        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+        let error = GrowError::from(layout_err);
+        let msg = alloc::format!("{error:?}");
+        assert!(msg.starts_with("InvalidLayout("));
+    }
+
+    #[test]
+    fn test_grow_error_from_layout_error() {
+        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+        let error: GrowError = layout_err.into();
+        assert!(matches!(error, GrowError::InvalidLayout(_)));
+    }
+
+    #[test]
+    fn test_grow_layout_overflow_preserves_state() {
+        let mut table = DebugImageInfoData::new();
+
+        // Add one entry to trigger the initial allocation (capacity = DEFAULT_CAPACITY).
+        table.add_entry(ImageInfoType::Normal, NonNull::dangling(), 0x6000 as efi::Handle);
+        assert_eq!(table.capacity(), DEFAULT_CAPACITY);
+        assert_eq!(table.len(), 1);
+
+        // Force capacity to a value that will overflow in grow().
+        //   - new_capacity = capacity * 2
+        //   - Layout::array::<EfiDebugImageInfo>(usize::MAX) will fail with LayoutError (since it is > isize::MAX)
+        table.capacity = usize::MAX / 2;
+
+        // grow() should fail with InvalidLayout and leave state unchanged.
+        let result = table.grow();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), GrowError::InvalidLayout(_)));
+
+        // Verify that capacity was not modified on failure.
+        assert_eq!(table.capacity, usize::MAX / 2);
+
+        // Restore valid capacity so Drop doesn't dealloc with wrong layout.
+        table.capacity = DEFAULT_CAPACITY;
+
+        // The original entry should still be accessible.
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.find(0x6000 as efi::Handle), Some(0));
     }
 }
