@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - major
+      - patina_plat_testing
       - feature/**/*
 
 concurrency:
@@ -32,7 +33,7 @@ permissions:
 jobs:
   notify-pending:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidationPending.yml@patina_e2e_plat_validation
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidationPending.yml@patina_plat_testing
     with:
       pr-number: ${{ github.event.pull_request.number }}
     secrets: inherit
