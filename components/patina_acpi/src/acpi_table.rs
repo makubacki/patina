@@ -293,6 +293,26 @@ pub struct AcpiTableHeader {
 }
 
 impl AcpiTableHeader {
+    /// Reads the 4-byte signature field from a raw `AcpiTableHeader` pointer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must point to a region of at least 4 bytes that is valid for reads.
+    pub unsafe fn read_signature_from_ptr(ptr: *const Self) -> u32 {
+        // SAFETY: Caller guarantees `ptr` points to at least 4 readable bytes.
+        unsafe { ptr::read_unaligned(ptr::addr_of!((*ptr).signature)) }
+    }
+
+    /// Reads the 4-byte length field from a raw `AcpiTableHeader` pointer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must point to a region of at least 8 bytes that is valid for reads.
+    pub unsafe fn read_length_from_ptr(ptr: *const Self) -> u32 {
+        // SAFETY: Caller guarantees `ptr` points to at least 8 readable bytes.
+        unsafe { ptr::read_unaligned(ptr::addr_of!((*ptr).length)) }
+    }
+
     /// Serialize an `AcpiTableHeader` into a `Vec<u8>` in ACPI's canonical layout.
     pub fn hdr_to_bytes(&self) -> Vec<u8> {
         // Pre‑allocate exactly the right length
