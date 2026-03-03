@@ -890,10 +890,10 @@ mod tests {
         provider.initialize(MockBootServices::new(), Service::mock(Box::new(StdMemoryManager::new()))).unwrap();
         create_dummy_rsdp(&provider);
 
-        let header1 = AcpiTableHeader { signature: 0x1, length: 100, ..Default::default() };
+        let header1 = AcpiTableHeader { signature: 0x1, length: ACPI_HEADER_LEN as u32, ..Default::default() };
         // SAFETY: The constructed table is a valid ACPI table.
         let table1 = unsafe { AcpiTable::new(header1, provider.memory_manager.get().unwrap()) };
-        let header2 = AcpiTableHeader { signature: 0x2, length: 100, ..Default::default() };
+        let header2 = AcpiTableHeader { signature: 0x2, length: ACPI_HEADER_LEN as u32, ..Default::default() };
         // SAFETY: The constructed table is a valid ACPI table.
         let table2 = unsafe { AcpiTable::new(header2, provider.memory_manager.get().unwrap()) };
         provider.install_standard_table(table1.unwrap()).expect("Install should succeed.");
@@ -903,9 +903,9 @@ mod tests {
         let result = provider.collect_tables();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].signature(), 0x1);
-        assert_eq!(result[0].header().length(), 100);
+        assert_eq!(result[0].header().length(), ACPI_HEADER_LEN as u32);
         assert_eq!(result[1].signature(), 0x2);
-        assert_eq!(result[1].header().length(), 100);
+        assert_eq!(result[1].header().length(), ACPI_HEADER_LEN as u32);
     }
 
     #[test]
@@ -1486,7 +1486,7 @@ mod tests {
         provider.register_notify(true, notify_fn).expect("should register notify");
 
         // Install a standard table and check if notify was called.
-        let header = AcpiTableHeader { signature: 0x0101, length: 100, ..Default::default() };
+        let header = AcpiTableHeader { signature: 0x0101, length: ACPI_HEADER_LEN as u32, ..Default::default() };
         // SAFETY: `header` has a valid header format.
         let table = unsafe { AcpiTable::new(header, provider.memory_manager.get().unwrap()).unwrap() };
         let _ = provider.install_acpi_table(table).unwrap();
@@ -1512,12 +1512,12 @@ mod tests {
         create_dummy_rsdp(&provider);
 
         // Install two standard tables
-        let header1 = AcpiTableHeader { signature: 0x10, length: 101, ..Default::default() };
+        let header1 = AcpiTableHeader { signature: 0x10, length: ACPI_HEADER_LEN as u32, ..Default::default() };
         // SAFETY: `table1` has the correct format by construction.
         let table1 = unsafe { AcpiTable::new(header1, provider.memory_manager.get().unwrap()).unwrap() };
         let key1 = provider.install_standard_table(table1).unwrap();
 
-        let header2 = AcpiTableHeader { signature: 0x11, length: 102, ..Default::default() };
+        let header2 = AcpiTableHeader { signature: 0x11, length: ACPI_HEADER_LEN as u32, ..Default::default() };
         // SAFETY: `table2` has the correct format by construction.
         let table2 = unsafe { AcpiTable::new(header2, provider.memory_manager.get().unwrap()).unwrap() };
         let key2 = provider.install_standard_table(table2).unwrap();
@@ -1526,13 +1526,13 @@ mod tests {
         let (got_key1, got_table1) = provider.get_table_at_idx(0).unwrap();
         assert_eq!(got_key1, key1);
         assert_eq!(got_table1.signature(), 0x10);
-        assert_eq!(got_table1.header().length(), 101);
+        assert_eq!(got_table1.header().length(), ACPI_HEADER_LEN as u32);
 
         // Index 1 should return the second table
         let (got_key2, got_table2) = provider.get_table_at_idx(1).unwrap();
         assert_eq!(got_key2, key2);
         assert_eq!(got_table2.signature(), 0x11);
-        assert_eq!(got_table2.header().length(), 102);
+        assert_eq!(got_table2.header().length(), ACPI_HEADER_LEN as u32);
 
         // Index out of bounds should return error
         let err = provider.get_table_at_idx(3).unwrap_err();
