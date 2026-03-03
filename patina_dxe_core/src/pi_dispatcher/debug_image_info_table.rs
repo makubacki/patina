@@ -417,253 +417,286 @@ pub(super) struct EfiSystemTablePointer {
 #[coverage(off)]
 mod tests {
     use super::*;
+    use crate::test_support;
+
+    fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
+        test_support::with_global_lock(|| {
+            test_support::init_test_logger();
+            f();
+        })
+        .unwrap();
+    }
 
     #[test]
     fn test_init_simple() {
-        let table = DebugImageInfoData::new();
-        assert_eq!(table.len(), 0);
-        assert_eq!(table.capacity(), 0);
-        assert!(table.table().is_empty());
+        with_locked_state(|| {
+            let table = DebugImageInfoData::new();
+            assert_eq!(table.len(), 0);
+            assert_eq!(table.capacity(), 0);
+            assert!(table.table().is_empty());
 
-        let locked_table = DebugImageInfoData::new_locked();
-        let table_ref = locked_table.read();
-        assert_eq!(table_ref.len(), 0);
-        assert_eq!(table_ref.capacity(), 0);
-        assert!(table_ref.table().is_empty());
+            let locked_table = DebugImageInfoData::new_locked();
+            let table_ref = locked_table.read();
+            assert_eq!(table_ref.len(), 0);
+            assert_eq!(table_ref.capacity(), 0);
+            assert!(table_ref.table().is_empty());
+        });
     }
 
     #[test]
     fn test_add_entry() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        assert_eq!(table.header.table_size, 0);
-        assert_eq!(table.len(), 0);
-        assert_eq!(table.capacity(), 0);
+            assert_eq!(table.header.table_size, 0);
+            assert_eq!(table.len(), 0);
+            assert_eq!(table.capacity(), 0);
 
-        table.add_entry(ImageInfoType::Normal, NonNull::dangling(), 0x1234 as efi::Handle);
+            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), 0x1234 as efi::Handle);
 
-        assert_eq!(table.header.table_size, 1);
-        assert_eq!(table.len(), 1);
-        assert_eq!(table.capacity(), DEFAULT_CAPACITY);
+            assert_eq!(table.header.table_size, 1);
+            assert_eq!(table.len(), 1);
+            assert_eq!(table.capacity(), DEFAULT_CAPACITY);
+        });
     }
 
     #[test]
     fn test_add_entry_require_grow() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        let count = DEFAULT_CAPACITY + 1;
-        for i in 0..count {
-            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x1000 + i) as efi::Handle);
-        }
+            let count = DEFAULT_CAPACITY + 1;
+            for i in 0..count {
+                table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x1000 + i) as efi::Handle);
+            }
 
-        assert_eq!(table.header.table_size, count as u32);
-        assert_eq!(table.len(), count);
-        assert_eq!(table.capacity(), DEFAULT_CAPACITY * 2);
+            assert_eq!(table.header.table_size, count as u32);
+            assert_eq!(table.len(), count);
+            assert_eq!(table.capacity(), DEFAULT_CAPACITY * 2);
+        });
     }
 
     #[test]
     fn test_search_entry() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        for i in 0..3 {
-            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x2000 + i) as efi::Handle);
-        }
+            for i in 0..3 {
+                table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x2000 + i) as efi::Handle);
+            }
 
-        // Table has been modified
-        assert_eq!(
-            table.header.update_status & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
-        );
-        assert_eq!(table.find(0x2000 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x2001 as efi::Handle), Some(1));
-        assert_eq!(table.find(0x2002 as efi::Handle), Some(2));
-        assert_eq!(table.find(0x3000 as efi::Handle), None);
+            // Table has been modified
+            assert_eq!(
+                table.header.update_status & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
+            );
+            assert_eq!(table.find(0x2000 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x2001 as efi::Handle), Some(1));
+            assert_eq!(table.find(0x2002 as efi::Handle), Some(2));
+            assert_eq!(table.find(0x3000 as efi::Handle), None);
+        });
     }
 
     #[test]
     fn test_remove_entry_still_find_others() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        for i in 0..5 {
-            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x4000 + i) as efi::Handle);
-        }
+            for i in 0..5 {
+                table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x4000 + i) as efi::Handle);
+            }
 
-        assert_eq!(table.len(), 5);
+            assert_eq!(table.len(), 5);
 
-        // Find all entries
-        assert_eq!(table.find(0x4000 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x4001 as efi::Handle), Some(1));
-        assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
-        assert_eq!(table.find(0x4003 as efi::Handle), Some(3));
-        assert_eq!(table.find(0x4004 as efi::Handle), Some(4));
+            // Find all entries
+            assert_eq!(table.find(0x4000 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x4001 as efi::Handle), Some(1));
+            assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
+            assert_eq!(table.find(0x4003 as efi::Handle), Some(3));
+            assert_eq!(table.find(0x4004 as efi::Handle), Some(4));
 
-        // Remove 0x4001, get swapped with 0x4005
-        table.remove_entry(0x4001 as efi::Handle);
-        assert_eq!(table.len(), 4);
-        assert_eq!(table.find(0x4000 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
-        assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
-        assert_eq!(table.find(0x4003 as efi::Handle), Some(3));
-        assert_eq!(table.find(0x4001 as efi::Handle), None);
+            // Remove 0x4001, get swapped with 0x4005
+            table.remove_entry(0x4001 as efi::Handle);
+            assert_eq!(table.len(), 4);
+            assert_eq!(table.find(0x4000 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
+            assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
+            assert_eq!(table.find(0x4003 as efi::Handle), Some(3));
+            assert_eq!(table.find(0x4001 as efi::Handle), None);
 
-        // Remove 0x4000, get swapped with 0x4003
-        table.remove_entry(0x4000 as efi::Handle);
-        assert_eq!(table.len(), 3);
-        assert_eq!(table.find(0x4003 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
-        assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
-        assert_eq!(table.find(0x4000 as efi::Handle), None);
-        assert_eq!(table.find(0x4001 as efi::Handle), None);
+            // Remove 0x4000, get swapped with 0x4003
+            table.remove_entry(0x4000 as efi::Handle);
+            assert_eq!(table.len(), 3);
+            assert_eq!(table.find(0x4003 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
+            assert_eq!(table.find(0x4002 as efi::Handle), Some(2));
+            assert_eq!(table.find(0x4000 as efi::Handle), None);
+            assert_eq!(table.find(0x4001 as efi::Handle), None);
 
-        // Remove 0x4002, does not swap as it's the last entry
-        table.remove_entry(0x4002 as efi::Handle);
-        assert_eq!(table.len(), 2);
-        assert_eq!(table.find(0x4003 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
-        assert_eq!(table.find(0x4002 as efi::Handle), None);
-        assert_eq!(table.find(0x4000 as efi::Handle), None);
-        assert_eq!(table.find(0x4001 as efi::Handle), None);
+            // Remove 0x4002, does not swap as it's the last entry
+            table.remove_entry(0x4002 as efi::Handle);
+            assert_eq!(table.len(), 2);
+            assert_eq!(table.find(0x4003 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x4004 as efi::Handle), Some(1));
+            assert_eq!(table.find(0x4002 as efi::Handle), None);
+            assert_eq!(table.find(0x4000 as efi::Handle), None);
+            assert_eq!(table.find(0x4001 as efi::Handle), None);
 
-        // Remove 0x4003, swaps with 0x4004
-        table.remove_entry(0x4003 as efi::Handle);
-        assert_eq!(table.len(), 1);
-        assert_eq!(table.find(0x4004 as efi::Handle), Some(0));
-        assert_eq!(table.find(0x4003 as efi::Handle), None);
-        assert_eq!(table.find(0x4002 as efi::Handle), None);
-        assert_eq!(table.find(0x4000 as efi::Handle), None);
-        assert_eq!(table.find(0x4001 as efi::Handle), None);
+            // Remove 0x4003, swaps with 0x4004
+            table.remove_entry(0x4003 as efi::Handle);
+            assert_eq!(table.len(), 1);
+            assert_eq!(table.find(0x4004 as efi::Handle), Some(0));
+            assert_eq!(table.find(0x4003 as efi::Handle), None);
+            assert_eq!(table.find(0x4002 as efi::Handle), None);
+            assert_eq!(table.find(0x4000 as efi::Handle), None);
+            assert_eq!(table.find(0x4001 as efi::Handle), None);
 
-        // Remove 0x4004, table is now empty
-        table.remove_entry(0x4004 as efi::Handle);
-        assert_eq!(table.len(), 0);
-        assert_eq!(table.find(0x4004 as efi::Handle), None);
-        assert_eq!(table.find(0x4003 as efi::Handle), None);
-        assert_eq!(table.find(0x4002 as efi::Handle), None);
-        assert_eq!(table.find(0x4000 as efi::Handle), None);
-        assert_eq!(table.find(0x4001 as efi::Handle), None);
+            // Remove 0x4004, table is now empty
+            table.remove_entry(0x4004 as efi::Handle);
+            assert_eq!(table.len(), 0);
+            assert_eq!(table.find(0x4004 as efi::Handle), None);
+            assert_eq!(table.find(0x4003 as efi::Handle), None);
+            assert_eq!(table.find(0x4002 as efi::Handle), None);
+            assert_eq!(table.find(0x4000 as efi::Handle), None);
+            assert_eq!(table.find(0x4001 as efi::Handle), None);
+        });
     }
 
     #[test]
     fn test_swap_remove_out_of_bounds() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        for i in 0..3 {
-            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x5000 + i) as efi::Handle);
-        }
+            for i in 0..3 {
+                table.add_entry(ImageInfoType::Normal, NonNull::dangling(), (0x5000 + i) as efi::Handle);
+            }
 
-        assert_eq!(table.len(), 3);
+            assert_eq!(table.len(), 3);
 
-        // Attempt to remove an out-of-bounds index
-        assert!(table.swap_remove(3).is_none());
+            // Attempt to remove an out-of-bounds index
+            assert!(table.swap_remove(3).is_none());
+        });
     }
 
     #[test]
     fn test_flag_setting() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        assert_eq!(table.header.update_status(), 0);
+            assert_eq!(table.header.update_status(), 0);
 
-        table.set_update_in_progress();
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS
-        );
+            table.set_update_in_progress();
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS
+            );
 
-        table.clear_update_in_progress();
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
-            0
-        );
+            table.clear_update_in_progress();
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
+                0
+            );
 
-        table.set_modified();
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
-        );
+            table.set_modified();
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
+            );
 
-        table.set_update_in_progress();
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS
-        );
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
-        );
+            table.set_update_in_progress();
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS
+            );
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
+            );
 
-        table.clear_update_in_progress();
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
-            0
-        );
-        assert_eq!(
-            table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
-            DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
-        );
+            table.clear_update_in_progress();
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_UPDATE_IN_PROGRESS,
+                0
+            );
+            assert_eq!(
+                table.header.update_status() & DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED,
+                DebugImageInfoTableHeader::EFI_DEBUG_IMAGE_INFO_TABLE_MODIFIED
+            );
+        });
     }
 
     #[test]
     fn test_grow_error_display_alloc_failed_msg() {
-        let error = GrowError::AllocFailed;
-        let msg = alloc::format!("{error}");
-        assert_eq!(msg, "allocation returned null");
+        with_locked_state(|| {
+            let error = GrowError::AllocFailed;
+            let msg = alloc::format!("{error}");
+            assert_eq!(msg, "allocation returned null");
+        });
     }
 
     #[test]
     fn test_grow_error_display_invalid_layout_msg() {
-        // Note: Zero alignment will result in a LayoutError.
-        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
-        let error = GrowError::InvalidLayout(layout_err);
-        let msg = alloc::format!("{error}");
-        assert!(msg.starts_with("invalid layout:"));
+        with_locked_state(|| {
+            // Note: Zero alignment will result in a LayoutError.
+            let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+            let error = GrowError::InvalidLayout(layout_err);
+            let msg = alloc::format!("{error}");
+            assert!(msg.starts_with("invalid layout:"));
+        });
     }
 
     #[test]
     fn test_grow_error_debug_msgs() {
-        let error = GrowError::AllocFailed;
-        let msg = alloc::format!("{error:?}");
-        assert_eq!(msg, "AllocFailed");
+        with_locked_state(|| {
+            let error = GrowError::AllocFailed;
+            let msg = alloc::format!("{error:?}");
+            assert_eq!(msg, "AllocFailed");
 
-        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
-        let error = GrowError::from(layout_err);
-        let msg = alloc::format!("{error:?}");
-        assert!(msg.starts_with("InvalidLayout("));
+            let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+            let error = GrowError::from(layout_err);
+            let msg = alloc::format!("{error:?}");
+            assert!(msg.starts_with("InvalidLayout("));
+        });
     }
 
     #[test]
     fn test_grow_error_from_layout_error() {
-        let layout_err = Layout::from_size_align(1, 0).unwrap_err();
-        let error: GrowError = layout_err.into();
-        assert!(matches!(error, GrowError::InvalidLayout(_)));
+        with_locked_state(|| {
+            let layout_err = Layout::from_size_align(1, 0).unwrap_err();
+            let error: GrowError = layout_err.into();
+            assert!(matches!(error, GrowError::InvalidLayout(_)));
+        });
     }
 
     #[test]
     fn test_grow_layout_overflow_preserves_state() {
-        let mut table = DebugImageInfoData::new();
+        with_locked_state(|| {
+            let mut table = DebugImageInfoData::new();
 
-        // Add one entry to trigger the initial allocation (capacity = DEFAULT_CAPACITY).
-        table.add_entry(ImageInfoType::Normal, NonNull::dangling(), 0x6000 as efi::Handle);
-        assert_eq!(table.capacity(), DEFAULT_CAPACITY);
-        assert_eq!(table.len(), 1);
+            // Add one entry to trigger the initial allocation (capacity = DEFAULT_CAPACITY).
+            table.add_entry(ImageInfoType::Normal, NonNull::dangling(), 0x6000 as efi::Handle);
+            assert_eq!(table.capacity(), DEFAULT_CAPACITY);
+            assert_eq!(table.len(), 1);
 
-        // Force capacity to a value that will overflow in grow().
-        //   - new_capacity = capacity * 2
-        //   - Layout::array::<EfiDebugImageInfo>(usize::MAX) will fail with LayoutError (since it is > isize::MAX)
-        table.capacity = usize::MAX / 2;
+            // Force capacity to a value that will overflow in grow().
+            //   - new_capacity = capacity * 2
+            //   - Layout::array::<EfiDebugImageInfo>(usize::MAX) will fail with LayoutError (since it is > isize::MAX)
+            table.capacity = usize::MAX / 2;
 
-        // grow() should fail with InvalidLayout and leave state unchanged.
-        let result = table.grow();
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), GrowError::InvalidLayout(_)));
+            // grow() should fail with InvalidLayout and leave state unchanged.
+            let result = table.grow();
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), GrowError::InvalidLayout(_)));
 
-        // Verify that capacity was not modified on failure.
-        assert_eq!(table.capacity, usize::MAX / 2);
+            // Verify that capacity was not modified on failure.
+            assert_eq!(table.capacity, usize::MAX / 2);
 
-        // Restore valid capacity so Drop doesn't dealloc with wrong layout.
-        table.capacity = DEFAULT_CAPACITY;
+            // Restore valid capacity so Drop doesn't dealloc with wrong layout.
+            table.capacity = DEFAULT_CAPACITY;
 
-        // The original entry should still be accessible.
-        assert_eq!(table.len(), 1);
-        assert_eq!(table.find(0x6000 as efi::Handle), Some(0));
+            // The original entry should still be accessible.
+            assert_eq!(table.len(), 1);
+            assert_eq!(table.find(0x6000 as efi::Handle), Some(0));
+        });
     }
 }
