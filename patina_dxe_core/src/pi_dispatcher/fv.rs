@@ -1042,13 +1042,14 @@ mod tests {
             //let fv_attributes3: *mut fw_fs::EfiFvAttributes = &mut fv_att;
 
             /* Instance 2 - Create a FV  interface with Bad physical address to handle Error cases. */
-            let mut fv_interface3 = MockProtocolData::new_fv_protocol(parent_handle);
+            let fv_interface3 = MockProtocolData::new_fv_protocol(parent_handle);
 
             let fv_ptr3 = NonNull::from(&*fv_interface3).cast::<c_void>();
             let fv_ptr3_const = fv_ptr3.cast::<pi::protocols::firmware_volume::Protocol>().as_ptr();
 
-            /* Corrupt the base address to cover error conditions  */
-            let base_no2: u64 = fv_interface3.as_mut() as *mut _ as u64 + 0x1000;
+            /* Allocate a readable buffer with invalid content (no valid _FVH signature) */
+            let bad_fv_buf = vec![0u8; size_of::<fv::Header>()].leak();
+            let base_no2: u64 = bad_fv_buf.as_ptr() as u64;
             let metadata2 = Metadata::new_fv(fv_interface3, base_no2);
             //save the protocol structure we're about to install in the private data.
             CORE.pi_dispatcher.fv_data.lock().fv_metadata.insert(fv_ptr3.addr(), metadata2);
