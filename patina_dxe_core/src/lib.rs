@@ -625,6 +625,7 @@ fn core_display_missing_arch_protocols() {
     }
 }
 
+// Test change
 fn call_bds() -> ! {
     // Enable status code capability in Firmware Performance DXE.
     match protocols::PROTOCOL_DB.locate_protocol(status_code::PROTOCOL_GUID) {
