@@ -2162,7 +2162,7 @@ impl SpinLockedGcd {
                                 "Cache attributes for memory region {base_address:#x?} of length {len:#x?} were updated to {new_cache_attributes:#x?} from {old_cache_attrs:#x?}, sending cache attributes changed event",
                             );
 
-                            EVENT_DB.signal_group(CACHE_ATTRIBUTE_CHANGE_EVENT_GROUP);
+                            EVENT_DB.signal_group(CACHE_ATTRIBUTE_CHANGE_EVENT_GROUP.into_inner());
                         } else if unmapped && old_cache_attributes.is_none() {
                             // in this case the region was unmapped and we had no caching attributes set up
                             log::trace!(
@@ -2170,7 +2170,7 @@ impl SpinLockedGcd {
                                 "Cache attributes for memory region {base_address:#x?} of length {len:#x?} were updated to {new_cache_attributes:#x?} from an unmapped state, sending cache attributes changed event",
                             );
 
-                            EVENT_DB.signal_group(CACHE_ATTRIBUTE_CHANGE_EVENT_GROUP);
+                            EVENT_DB.signal_group(CACHE_ATTRIBUTE_CHANGE_EVENT_GROUP.into_inner());
                         }
                     }
 
@@ -2224,6 +2224,8 @@ impl SpinLockedGcd {
         io.maximum_address = 0;
         io.io_blocks = Rbt::new();
         self.page_table.lock().take();
+        // Reset memory protection policy to default state
+        self.memory_protection_policy.memory_allocation_default_attributes.set(efi::MEMORY_XP);
     }
 
     /// Adds a page table for testing purposes

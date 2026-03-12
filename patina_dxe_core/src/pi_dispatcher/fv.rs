@@ -286,7 +286,7 @@ impl<P: PlatformInfo> FvProtocolData<P> {
             file.fv_attributes()
         };
 
-        Ok((file.name(), attributes, file.data().len(), file.file_type_raw()))
+        Ok((file.name().into_inner(), attributes, file.data().len(), file.file_type_raw()))
     }
 
     fn new_fvb_protocol(parent_handle: Option<efi::Handle>) -> Box<pi::protocols::firmware_volume_block::Protocol> {
@@ -336,7 +336,7 @@ impl<P: PlatformInfo> FvProtocolData<P> {
         // install the protocol and return status
         core_install_protocol_interface(
             handle,
-            pi::protocols::firmware_volume_block::PROTOCOL_GUID,
+            pi::protocols::firmware_volume_block::PROTOCOL_GUID.into_inner(),
             protocol_ptr.as_ptr(),
         )
     }
@@ -358,7 +358,11 @@ impl<P: PlatformInfo> FvProtocolData<P> {
         self.fv_metadata.insert(protocol_ptr.addr(), metadata);
 
         // install the protocol and return status
-        core_install_protocol_interface(handle, pi::protocols::firmware_volume::PROTOCOL_GUID, protocol_ptr.as_ptr())
+        core_install_protocol_interface(
+            handle,
+            pi::protocols::firmware_volume::PROTOCOL_GUID.into_inner(),
+            protocol_ptr.as_ptr(),
+        )
     }
 
     /// Installs both the FVB and FV protocols for a firmware volume at the specified base address.
@@ -410,7 +414,7 @@ impl<P: PlatformInfo> FvProtocolData<P> {
         let device_path_ptr = match fv.fv_name() {
             Some(fv_name) => {
                 // Construct FvPiWgDevicePath
-                let device_path = FvPiWgDevicePath::new_fv(fv_name);
+                let device_path = FvPiWgDevicePath::new_fv(fv_name.into_inner());
                 Box::into_raw(Box::new(device_path)) as *mut c_void
             }
             None => {
@@ -928,8 +932,8 @@ mod tests {
                     header,
                     base_address: 0,
                     length: 0x8000,
-                    fv_name: r_efi::efi::Guid::from_fields(1, 2, 3, 4, 5, &[6, 7, 8, 9, 10, 11]),
-                    file_name: r_efi::efi::Guid::from_fields(1, 2, 3, 4, 5, &[6, 7, 8, 9, 10, 11]),
+                    fv_name: patina::BinaryGuid::from_fields(1, 2, 3, 4, 5, &[6, 7, 8, 9, 10, 11]),
+                    file_name: patina::BinaryGuid::from_fields(1, 2, 3, 4, 5, &[6, 7, 8, 9, 10, 11]),
                 }
             }
             fn gen_firmware_volume() -> hob::FirmwareVolume {

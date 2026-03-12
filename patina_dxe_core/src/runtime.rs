@@ -77,7 +77,7 @@ pub fn init_runtime_support() {
         .expect("Failed to create runtime protocol installation callback.");
 
     PROTOCOL_DB
-        .register_protocol_notify(runtime::PROTOCOL_GUID, event)
+        .register_protocol_notify(runtime::PROTOCOL_GUID.into_inner(), event)
         .expect("Failed to register protocol notify on runtime protocol.");
 }
 
@@ -91,7 +91,8 @@ pub fn finalize_runtime_support() {
 
 extern "efiapi" fn runtime_protocol_notify(_event: efi::Event, _context: *mut c_void) {
     log::info!("Runtime protocol installed. Setting up pointers.");
-    let ptr = PROTOCOL_DB.locate_protocol(runtime::PROTOCOL_GUID).expect("Failed to locate runtime protocol.");
+    let ptr =
+        PROTOCOL_DB.locate_protocol(runtime::PROTOCOL_GUID.into_inner()).expect("Failed to locate runtime protocol.");
     let mut data = RUNTIME_DATA.lock();
     data.runtime_arch_ptr = ptr as *mut runtime::Protocol;
     data.update_protocol_lists();

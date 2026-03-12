@@ -60,8 +60,7 @@ static WATCHDOG_ARCH_PTR: ArchProtocolPtr<protocols::watchdog::Protocol> = ArchP
 // Pre-EBS GUID is a Project Mu defined GUID. It should be removed in favor of the UEFI Spec defined
 // Before Exit Boot Services event group when all platform usage is confirmed to be transitioned to that.
 // { 0x5f1d7e16, 0x784a, 0x4da2, { 0xb0, 0x84, 0xf8, 0x12, 0xf2, 0x3a, 0x8d, 0xce }}
-pub const PRE_EBS_GUID: efi::Guid =
-    efi::Guid::from_fields(0x5f1d7e16, 0x784a, 0x4da2, 0xb0, 0x84, &[0xf8, 0x12, 0xf2, 0x3a, 0x8d, 0xce]);
+pub const PRE_EBS_GUID: patina::BinaryGuid = patina::BinaryGuid::from_string("5F1D7E16-784A-4DA2-B084-F812F23A8DCE");
 // TODO [END]: LOCAL (TEMP) GUID DEFINITIONS (MOVE LATER)
 extern "efiapi" fn calculate_crc32(data: *mut c_void, data_size: usize, crc_32: *mut u32) -> efi::Status {
     if data.is_null() || data_size == 0 || crc_32.is_null() {
@@ -137,7 +136,7 @@ extern "efiapi" fn set_watchdog_timer(
 // This callback is invoked when the Metronome Architectural protocol is installed. It initializes the
 // METRONOME_ARCH_PTR to point to the Metronome Architectural protocol interface.
 extern "efiapi" fn metronome_arch_available(event: efi::Event, _context: *mut c_void) {
-    match PROTOCOL_DB.locate_protocol(protocols::metronome::PROTOCOL_GUID) {
+    match PROTOCOL_DB.locate_protocol(protocols::metronome::PROTOCOL_GUID.into_inner()) {
         Ok(metronome_arch_ptr) => {
             if metronome_arch_ptr.is_null() {
                 panic!("Located metronome protocol pointer is null.");
@@ -157,7 +156,7 @@ extern "efiapi" fn metronome_arch_available(event: efi::Event, _context: *mut c_
 // This callback is invoked when the Watchdog Timer Architectural protocol is installed. It initializes the
 // WATCHDOG_ARCH_PTR to point to the Watchdog Timer Architectural protocol interface.
 extern "efiapi" fn watchdog_arch_available(event: efi::Event, _context: *mut c_void) {
-    match PROTOCOL_DB.locate_protocol(protocols::watchdog::PROTOCOL_GUID) {
+    match PROTOCOL_DB.locate_protocol(protocols::watchdog::PROTOCOL_GUID.into_inner()) {
         Ok(watchdog_arch_ptr) => {
             if watchdog_arch_ptr.is_null() {
                 panic!("Located watchdog protocol pointer is null.");
@@ -179,7 +178,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
     log::info!("EBS initiated.");
     // Pre-exit boot services and before exit boot services are only signaled once
     if !EXIT_BOOT_SERVICES_CALLED.is_completed() {
-        EVENT_DB.signal_group(PRE_EBS_GUID);
+        EVENT_DB.signal_group(PRE_EBS_GUID.into_inner());
 
         // Signal the event group before exit boot services
         EVENT_DB.signal_group(efi::EVENT_GROUP_BEFORE_EXIT_BOOT_SERVICES);
@@ -188,7 +187,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
     }
 
     // Disable the timer
-    match PROTOCOL_DB.locate_protocol(protocols::timer::PROTOCOL_GUID) {
+    match PROTOCOL_DB.locate_protocol(protocols::timer::PROTOCOL_GUID.into_inner()) {
         Ok(timer_arch_ptr) => {
             let timer_arch_ptr = timer_arch_ptr as *mut protocols::timer::Protocol;
             // SAFETY: timer_arch_ptr comes from locate_protocol and is considered valid based on the successful
@@ -209,7 +208,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
         Err(err) => {
             log::error!("Failed to terminate memory map: {err:?}");
             GCD.unlock_memory_space();
-            EVENT_DB.signal_group(guids::EBS_FAILED);
+            EVENT_DB.signal_group(guids::EBS_FAILED.into_inner());
             return err.into();
         }
     }
@@ -218,7 +217,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
     EVENT_DB.signal_group(efi::EVENT_GROUP_EXIT_BOOT_SERVICES);
 
     // Initialize StatusCode and send EFI_SW_BS_PC_EXIT_BOOT_SERVICES
-    match PROTOCOL_DB.locate_protocol(protocols::status_code::PROTOCOL_GUID) {
+    match PROTOCOL_DB.locate_protocol(protocols::status_code::PROTOCOL_GUID.into_inner()) {
         Ok(status_code_ptr) => {
             let status_code_ptr = status_code_ptr as *mut protocols::status_code::Protocol;
             // SAFETY: status_code_ptr comes from locate_protocol and is considered valid based on the successful
@@ -228,7 +227,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
                 status_code::EFI_PROGRESS_CODE,
                 status_code::EFI_SOFTWARE_EFI_BOOT_SERVICE | status_code::EFI_SW_BS_PC_EXIT_BOOT_SERVICES,
                 0,
-                &guids::DXE_CORE,
+                &guids::DXE_CORE.into_inner(),
                 core::ptr::null(),
             );
         }
@@ -248,7 +247,7 @@ pub extern "efiapi" fn exit_boot_services(_handle: efi::Handle, map_key: usize) 
             .expect("The System Table pointer is null. This is invalid.")
             .clear_boot_time_services();
     }
-    match PROTOCOL_DB.locate_protocol(protocols::runtime::PROTOCOL_GUID) {
+    match PROTOCOL_DB.locate_protocol(protocols::runtime::PROTOCOL_GUID.into_inner()) {
         Ok(rt_arch_ptr) => {
             let rt_arch_ptr = rt_arch_ptr as *mut protocols::runtime::Protocol;
             // SAFETY: rt_arch_ptr comes from locate_protocol and is considered valid based on the successful
@@ -279,7 +278,7 @@ pub fn init_misc_boot_services_support(st: &mut EfiSystemTable) {
         .expect("Failed to create metronome available callback.");
 
     PROTOCOL_DB
-        .register_protocol_notify(protocols::metronome::PROTOCOL_GUID, event)
+        .register_protocol_notify(protocols::metronome::PROTOCOL_GUID.into_inner(), event)
         .expect("Failed to register protocol notify on metronome available.");
 
     //set up call back for watchdog arch protocol installation.
@@ -288,7 +287,7 @@ pub fn init_misc_boot_services_support(st: &mut EfiSystemTable) {
         .expect("Failed to create watchdog available callback.");
 
     PROTOCOL_DB
-        .register_protocol_notify(protocols::watchdog::PROTOCOL_GUID, event)
+        .register_protocol_notify(protocols::watchdog::PROTOCOL_GUID.into_inner(), event)
         .expect("Failed to register protocol notify on metronome available.");
 }
 

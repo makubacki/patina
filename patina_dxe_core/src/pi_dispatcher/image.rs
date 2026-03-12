@@ -1298,13 +1298,14 @@ fn get_file_buffer_from_fw(
 ) -> Result<(Vec<u8>, efi::Handle), EfiError> {
     // Locate the handles to a device on the file_path that supports the firmware volume protocol
     let (remaining_file_path, handle) =
-        core_locate_device_path(pi::protocols::firmware_volume::PROTOCOL_GUID, file_path)?;
+        core_locate_device_path(pi::protocols::firmware_volume::PROTOCOL_GUID.into_inner(), file_path)?;
 
     // For FwVol File system there is only a single file name that is a GUID.
     let fv_name_guid = get_file_guid_from_device_path(remaining_file_path)?;
 
     // Get the firmware volume protocol
-    let fv_ptr = PROTOCOL_DB.get_interface_for_handle(handle, pi::protocols::firmware_volume::PROTOCOL_GUID)?
+    let fv_ptr = PROTOCOL_DB
+        .get_interface_for_handle(handle, pi::protocols::firmware_volume::PROTOCOL_GUID.into_inner())?
         as *mut pi::protocols::firmware_volume::Protocol;
     if fv_ptr.is_null() {
         debug_assert!(!fv_ptr.is_null(), "ERROR: get_interface_for_handle returned NULL ptr for FirmwareVolume!");
@@ -1433,7 +1434,7 @@ fn authenticate_image(
     // SAFETY: Checks locate_protocol return value to determine if pointer is valid. as_ref() is used for shared access
     // which will also check if the pointer is null before allowing access.
     let security2_protocol = unsafe {
-        match PROTOCOL_DB.locate_protocol(pi::protocols::security2::PROTOCOL_GUID) {
+        match PROTOCOL_DB.locate_protocol(pi::protocols::security2::PROTOCOL_GUID.into_inner()) {
             Ok(protocol) => (protocol as *mut pi::protocols::security2::Protocol).as_ref(),
             //If security protocol is not located, then assume it has not yet been produced and implicitly trust the
             //Firmware Volume.
@@ -1444,7 +1445,7 @@ fn authenticate_image(
     // SAFETY: Checks locate_protocol return value to determine if pointer is valid. as_ref() is used for shared access
     // which will also check if the pointer is null before allowing access.
     let security_protocol = unsafe {
-        match PROTOCOL_DB.locate_protocol(pi::protocols::security::PROTOCOL_GUID) {
+        match PROTOCOL_DB.locate_protocol(pi::protocols::security::PROTOCOL_GUID.into_inner()) {
             Ok(protocol) => (protocol as *mut pi::protocols::security::Protocol).as_ref(),
             //If security protocol is not located, then assume it has not yet been produced and implicitly trust the
             //Firmware Volume.
@@ -1855,7 +1856,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security::PROTOCOL_GUID,
+                    pi::protocols::security::PROTOCOL_GUID.into_inner(),
                     &security_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -1906,7 +1907,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security::PROTOCOL_GUID,
+                    pi::protocols::security::PROTOCOL_GUID.into_inner(),
                     &security_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -1935,7 +1936,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security2::PROTOCOL_GUID,
+                    pi::protocols::security2::PROTOCOL_GUID.into_inner(),
                     &security2_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -1986,7 +1987,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security2::PROTOCOL_GUID,
+                    pi::protocols::security2::PROTOCOL_GUID.into_inner(),
                     &security2_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -2039,7 +2040,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security2::PROTOCOL_GUID,
+                    pi::protocols::security2::PROTOCOL_GUID.into_inner(),
                     &security2_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -2085,7 +2086,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    pi::protocols::security2::PROTOCOL_GUID,
+                    pi::protocols::security2::PROTOCOL_GUID.into_inner(),
                     &security2_protocol as *const _ as *mut _,
                 )
                 .unwrap();

@@ -407,7 +407,7 @@ impl<P: PlatformInfo> Core<P> {
         let dxe_services_system_table = Box::new(dxe_services_system_table);
 
         let _ = config_tables::core_install_configuration_table(
-            dxe_services::DXE_SERVICES_TABLE_GUID,
+            dxe_services::DXE_SERVICES_TABLE_GUID.into_inner(),
             Box::into_raw(dxe_services_system_table) as *mut c_void,
             system_table,
         );
@@ -2159,7 +2159,7 @@ mod tests {
             static CORE: MockCore = MockCore::new(NullSectionExtractor::new());
             CORE.override_instance();
             // Any GUID is fine; there are no pending drivers in this test harness
-            let guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &[0, 0, 0, 0, 0, 0]);
+            let guid: efi::Guid = patina::guids::ZERO.into();
             let s = MockCore::schedule_efiapi(core::ptr::null_mut(), &guid);
             assert_eq!(s, efi::Status::NOT_FOUND);
         });

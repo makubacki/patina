@@ -36,7 +36,7 @@ struct EfiCpuArchProtocolImpl {
 
 // SAFETY: EfiCpuArchProtocolImpl provides a valid protocol structure with stable GUID.
 unsafe impl ProtocolInterface for EfiCpuArchProtocolImpl {
-    const PROTOCOL_GUID: efi::Guid = PROTOCOL_GUID;
+    const PROTOCOL_GUID: patina::BinaryGuid = PROTOCOL_GUID;
 }
 
 // Helper function to convert a raw mutable pointer to a mutable reference.

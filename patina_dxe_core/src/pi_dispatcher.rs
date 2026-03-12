@@ -146,7 +146,7 @@ impl<P: PlatformInfo> PiDispatcher<P> {
             .expect("Failed to create fv protocol installation callback.");
 
         PROTOCOL_DB
-            .register_protocol_notify(firmware_volume_block::PROTOCOL_GUID, event)
+            .register_protocol_notify(firmware_volume_block::PROTOCOL_GUID.into_inner(), event)
             .expect("Failed to register protocol notify on fv protocol.");
 
         // Perform image related initialization for the debugger.
@@ -344,7 +344,7 @@ impl<P: PlatformInfo> PiDispatcher<P> {
                         };
 
                         if let Some(fv_name_guid) = fv_name_guid
-                            && self.is_fv_already_installed(fv_name_guid)
+                            && self.is_fv_already_installed(fv_name_guid.into_inner())
                         {
                             log::debug!(
                                 "Skipping FV file {:?} - FV with name GUID {:?} is already installed",
@@ -412,14 +412,16 @@ impl<P: PlatformInfo> PiDispatcher<P> {
     /// `false` otherwise
     fn is_fv_already_installed(&self, fv_name_guid: efi::Guid) -> bool {
         // Get all handles with a FVB protocol
-        let fvb_handles = match PROTOCOL_DB.locate_handles(Some(firmware_volume_block::PROTOCOL_GUID)) {
+        let fvb_handles = match PROTOCOL_DB.locate_handles(Some(firmware_volume_block::PROTOCOL_GUID.into_inner())) {
             Ok(handles) => handles,
             Err(_) => return false,
         };
 
         // Check each FVB handle to see if it has the same FV name GUID
         for handle in fvb_handles {
-            let Ok(ptr) = PROTOCOL_DB.get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID) else {
+            let Ok(ptr) =
+                PROTOCOL_DB.get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
+            else {
                 continue;
             };
             let fvb_ptr = ptr as *mut firmware_volume_block::Protocol;
@@ -487,7 +489,7 @@ impl<P: PlatformInfo> PiDispatcher<P> {
     extern "efiapi" fn fw_vol_event_protocol_notify_efiapi(_event: efi::Event, _context: *mut c_void) {
         let pd = &crate::Core::<P>::instance().pi_dispatcher;
         //Note: runs at TPL_CALLBACK
-        match PROTOCOL_DB.locate_handles(Some(firmware_volume_block::PROTOCOL_GUID)) {
+        match PROTOCOL_DB.locate_handles(Some(firmware_volume_block::PROTOCOL_GUID.into_inner())) {
             Ok(fv_handles) => pd.add_fv_handles(fv_handles).expect("Error adding FV handles"),
             Err(_) => panic!("could not locate handles in protocol call back"),
         };
@@ -516,7 +518,7 @@ impl PendingFirmwareVolumeImage {
     fn evaluate_auth(&self) -> Result<(), EfiError> {
         // SAFETY: locate_protocol returns a valid pointer when present. as_ref is used for shared access.
         let security_protocol = unsafe {
-            match PROTOCOL_DB.locate_protocol(patina::pi::protocols::security::PROTOCOL_GUID) {
+            match PROTOCOL_DB.locate_protocol(patina::pi::protocols::security::PROTOCOL_GUID.into_inner()) {
                 Ok(protocol) => (protocol as *mut patina::pi::protocols::security::Protocol)
                     .as_ref()
                     .expect("Security Protocol should not be null"),
@@ -592,7 +594,9 @@ impl DispatcherContext {
         for handle in new_handles {
             if self.processed_fvs.insert(handle) {
                 //process freshly discovered FV
-                let fvb_ptr = match PROTOCOL_DB.get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID) {
+                let fvb_ptr = match PROTOCOL_DB
+                    .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
+                {
                     Err(_) => {
                         panic!(
                             "get_interface_for_handle failed to return an interface on a handle where it should have existed"
@@ -642,7 +646,7 @@ impl DispatcherContext {
                     let file = file?;
                     if file.file_type_raw() == ffs::file::raw::r#type::DRIVER {
                         let file = file.clone();
-                        let file_name = file.name();
+                        let file_name = file.name().into_inner();
                         let sections = file.sections_with_extractor(extractor)?;
 
                         let depex = sections
@@ -722,7 +726,7 @@ impl DispatcherContext {
                     }
                     if file.file_type_raw() == ffs::file::raw::r#type::FIRMWARE_VOLUME_IMAGE {
                         let file = file.clone();
-                        let file_name = file.name();
+                        let file_name = file.name().into_inner();
 
                         let sections = file.sections_with_extractor(extractor)?;
 
@@ -987,7 +991,7 @@ mod tests {
 
             // Monkey Patch get_physical_address to one that returns an error.
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // SAFETY: protocol was retrieved from PROTOCOL_DB and remains valid for this test scope.
@@ -1025,7 +1029,7 @@ mod tests {
 
             // Monkey Patch get_physical_address to set address to 0.
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // SAFETY: protocol was retrieved from PROTOCOL_DB and remains valid for this test scope.
@@ -1060,7 +1064,7 @@ mod tests {
 
             // Monkey Patch get_physical_address to set to a slightly invalid address.
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // SAFETY: protocol was retrieved from PROTOCOL_DB and remains valid for this test scope.
@@ -1322,7 +1326,7 @@ mod tests {
             PROTOCOL_DB
                 .install_protocol_interface(
                     None,
-                    patina::pi::protocols::security::PROTOCOL_GUID,
+                    patina::pi::protocols::security::PROTOCOL_GUID.into_inner(),
                     &security_protocol as *const _ as *mut _,
                 )
                 .unwrap();
@@ -1366,7 +1370,7 @@ mod tests {
 
             // Check that the installed FV is detected
             assert!(
-                CORE.pi_dispatcher.is_fv_already_installed(actual_fv_guid),
+                CORE.pi_dispatcher.is_fv_already_installed(actual_fv_guid.into_inner()),
                 "Should return true when FV is installed"
             );
 
@@ -1494,7 +1498,7 @@ mod tests {
                     };
 
                     assert!(
-                        CORE.pi_dispatcher.is_fv_already_installed(child_fv_guid),
+                        CORE.pi_dispatcher.is_fv_already_installed(child_fv_guid.into_inner()),
                         "Child FV should be detected as already installed"
                     );
 
@@ -1542,17 +1546,17 @@ mod tests {
                 unsafe { CORE.pi_dispatcher.install_firmware_volume(fv_raw.expose_provenance() as u64, None).unwrap() };
 
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
 
             PROTOCOL_DB
-                .uninstall_protocol_interface(handle, firmware_volume_block::PROTOCOL_GUID, protocol)
+                .uninstall_protocol_interface(handle, firmware_volume_block::PROTOCOL_GUID.into_inner(), protocol)
                 .expect("Failed to uninstall protocol");
 
             PROTOCOL_DB
                 .install_protocol_interface(
                     Some(handle),
-                    firmware_volume_block::PROTOCOL_GUID,
+                    firmware_volume_block::PROTOCOL_GUID.into_inner(),
                     core::ptr::null_mut::<c_void>(),
                 )
                 .expect("Failed to install null protocol");
@@ -1595,7 +1599,7 @@ mod tests {
                 unsafe { CORE.pi_dispatcher.install_firmware_volume(fv_raw.expose_provenance() as u64, None).unwrap() };
 
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // Patch get_physical_address to return an error
@@ -1640,7 +1644,7 @@ mod tests {
 
             // Patch get_physical_address to return zero
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // SAFETY: protocol was retrieved from PROTOCOL_DB and remains valid for this test scope.
@@ -1689,7 +1693,7 @@ mod tests {
 
             // Patch get_physical_address to return the invalid FV address
             let protocol = PROTOCOL_DB
-                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID)
+                .get_interface_for_handle(handle, firmware_volume_block::PROTOCOL_GUID.into_inner())
                 .expect("Failed to get FVB protocol");
             let protocol = protocol as *mut firmware_volume_block::Protocol;
             // SAFETY: protocol was retrieved from PROTOCOL_DB and remains valid for this test scope.
