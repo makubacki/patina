@@ -199,6 +199,7 @@ mod tests {
                 attribute: MtrrMemoryCacheType,
             ) -> MtrrResult<()>;
             fn set_memory_attributes(&mut self, ranges: &[MtrrMemoryRange]) -> MtrrResult<()>;
+            #[allow(refining_impl_trait_internal)]
             fn get_memory_ranges(&self) -> MtrrResult<Vec<MtrrMemoryRange>>;
 
             fn debug_print_all_mtrrs(&self);
