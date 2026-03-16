@@ -65,6 +65,11 @@ RFC.
 
 Platform testing and integration feedback is very welcome.
 
+### AI Policy
+
+Patina does not accept contributions directly from AI tools (e.g. GitHub Copilot) and has an AI Policy defined in
+[CONTRIBUTING.md](CONTRIBUTING.md#ai-policy) that must be followed for any contributions that are AI-assisted.
+
 ## Performing a Release
 
 Below is the information required to perform a release that publishes to crates.io:
