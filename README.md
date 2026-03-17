@@ -39,6 +39,21 @@ incremental migration of today's firmware components largely written in C to Rus
 objective for this effort is to improve the security and stability of system firmware by leveraging the memory safety
 offered by Rust while retaining similar boot performance.
 
+**Patina is not a simple port of C UEFI code to Rust**.
+
+Patina is a pure‑Rust UEFI firmware implementation that removes legacy complexity and introduces a modern architecture,
+while preserving compatibility with current PI Specifications and enabling a clear path toward writing more firmware
+components in pure Rust over time.
+
+**Simply writing individual C UEFI drivers in Rust is not equivalent to Patina**.
+
+To better understand the types of memory safety problems that
+Patina helps mitigate, see [Memory Safety Strategy](https://opendevicepartnership.github.io/patina/background/memory_safety_strategy.html).
+
+Otherwise, read the docs to learn about concepts like [Patina DXE Core Requirements](https://opendevicepartnership.github.io/patina/integrate/patina_dxe_core_requirements.html)
+and the [Patina Component Model](https://opendevicepartnership.github.io/patina/component/getting_started.html) to
+better understand how Patina is structured and how to integrate it into a platform.
+
 ## Docs
 
 * **[Getting Started](https://opendevicepartnership.github.io/patina/):** Patina's official getting started guide,
