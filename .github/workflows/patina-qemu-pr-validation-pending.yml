@@ -19,6 +19,7 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
+      - status_check_base
       - major
       - feature/**/*
 

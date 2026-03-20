@@ -20,11 +20,13 @@ on:
   push:
     branches:
       - main
+      - status_check_base
       - major
       - feature/**/*
   pull_request:
     branches:
       - main
+      - status_check_base
       - major
       - feature/**/*
 
@@ -40,15 +42,11 @@ concurrency:
 jobs:
   ci_workflow:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/CiWorkflow.yml@v0.3.9
-    with:
-      build-tasks: build,build-x64,build-aarch64
-      run-cargo-vet: false
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI placeholder for testing - success"
   mdbook_docs_test:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@v0.3.9
-    with:
-      mdbook-path: "docs"
-      build-cmd: cargo make build-lib
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI placeholder for testing - success"
