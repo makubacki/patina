@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - major
+      - patina_plat_testing_2
       - feature/**/*
 
 concurrency:
