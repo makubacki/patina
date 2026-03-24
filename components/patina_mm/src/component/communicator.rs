@@ -227,9 +227,7 @@ impl MmCommunicator {
                     buffer_id
                 );
 
-                // SAFETY: The communicator reference remains valid as a stored service
-                let self_ptr = &self as *const MmCommunicator;
-                let context = comm_buffer_update::register_buffer_update_notify(boot_services, buffer_id, self_ptr)?;
+                let context = comm_buffer_update::register_buffer_update_notify(boot_services, buffer_id)?;
 
                 // Store context reference for checking pending updates in communicate()
                 self.notify_context = Some(context);
