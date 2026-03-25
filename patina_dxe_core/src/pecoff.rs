@@ -453,7 +453,7 @@ pub fn load_resource_section(pe_info: &UefiPeInfo, image: &[u8]) -> error::Resul
 
                     let name_start_offset =
                         directory_entry.name_offset() as usize + core::mem::size_of::<DirectoryString>();
-                    let name_end_offset = name_start_offset + (resource_directory_string.length as usize * 2);
+                    let name_end_offset = name_start_offset + (resource_directory_string.length as usize) * 2;
                     let string_val = resource_section
                         .get(name_start_offset..name_end_offset)
                         .ok_or(error::Error::Goblin(goblin::error::Error::BufferTooShort(name_end_offset, "bytes")))?;
