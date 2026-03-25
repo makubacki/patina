@@ -447,14 +447,15 @@ pub fn load_resource_section(pe_info: &UefiPeInfo, image: &[u8]) -> error::Resul
                     let resource_directory_string =
                         resource_section.pread::<DirectoryString>(directory_entry.name_offset() as usize)?;
 
-                    let name_start_offset = (directory_entry.name_offset() + 1) as usize;
-                    let name_end_offset = name_start_offset + (resource_directory_string.length * 2) as usize;
+                    let name_start_offset =
+                        directory_entry.name_offset() as usize + core::mem::size_of::<DirectoryString>();
+                    let name_end_offset = name_start_offset + (resource_directory_string.length as usize * 2);
                     let string_val = resource_section
                         .get(name_start_offset..name_end_offset)
                         .ok_or(error::Error::Goblin(goblin::error::Error::BufferTooShort(name_end_offset, "bytes")))?;
 
-                    // L"HII" = [0x0, 0x48, 0x0, 0x49, 0x0, 0x49]
-                    if resource_directory_string.length == 3 && string_val == [0x0, 0x48, 0x0, 0x49, 0x0, 0x49] {
+                    // L"HII" in UTF-16LE = [0x48, 0x00, 0x49, 0x00, 0x49, 0x00]
+                    if resource_directory_string.length == 3 && string_val == [0x48, 0x00, 0x49, 0x00, 0x49, 0x00] {
                         if directory_entry.data_is_directory() {
                             if directory_entry.offset_to_directory() > size {
                                 return Err(error::Error::Goblin(goblin::error::Error::BufferTooShort(
@@ -873,5 +874,27 @@ mod tests {
             Ok(_) => panic!("Expected BufferTooShort error"),
             Err(e) => panic!("Expected BufferTooShort error, got {e:?}"),
         }
+    }
+
+    /// Verifies that the HII resource string comparison in `load_resource_section` uses the
+    /// correct UTF-16LE encoding and reads from the correct offset in the resource directory.
+    #[test]
+    fn test_hii_string_uses_correct_utf16le_encoding_at_correct_offset() {
+        test_support::init_test_logger();
+        let image = include_bytes!("../resources/test/pe32/test_image_msvc_hii.pe32");
+        let image_info = UefiPeInfo::parse(image).unwrap();
+
+        let result = load_resource_section(&image_info, image).unwrap();
+        assert!(result.is_some(), "load_resource_section should find the HII resource section");
+
+        // Knowing that the string is at offset 0xAA5A in test_image_msvc_hii.pe32,
+        // verify load_resource_section correctly identifies it by checking that the
+        // UTF-16LE encoding of "HII" is correct at that offset.
+        const HII_STRING_FILE_OFFSET: usize = 0xAA5A;
+        assert_eq!(
+            &image[HII_STRING_FILE_OFFSET..HII_STRING_FILE_OFFSET + 6],
+            &[0x48u8, 0x00, 0x49, 0x00, 0x49, 0x00],
+            "UTF-16LE for 'HII' should be [0x48, 0x00, 0x49, 0x00, 0x49, 0x00]"
+        );
     }
 }
