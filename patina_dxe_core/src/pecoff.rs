@@ -433,9 +433,13 @@ pub fn load_resource_section(pe_info: &UefiPeInfo, image: &[u8]) -> error::Resul
                 return Err(error::Error::Goblin(goblin::error::Error::BufferTooShort(offset, "bytes")));
             }
 
-            let mut directory_entry: DirectoryEntry = resource_section.pread(core::mem::size_of::<Directory>())?;
+            let mut directory_entry: DirectoryEntry;
 
-            for _ in 0..directory.number_of_named_entries {
+            for i in 0..directory.number_of_named_entries {
+                let entry_offset =
+                    core::mem::size_of::<Directory>() + (i as usize) * core::mem::size_of::<DirectoryEntry>();
+                directory_entry = resource_section.pread(entry_offset)?;
+
                 if directory_entry.name_is_string() {
                     if directory_entry.name_offset() >= size {
                         return Err(error::Error::Goblin(goblin::error::Error::BufferTooShort(
@@ -896,5 +900,77 @@ mod tests {
             &[0x48u8, 0x00, 0x49, 0x00, 0x49, 0x00],
             "UTF-16LE for 'HII' should be [0x48, 0x00, 0x49, 0x00, 0x49, 0x00]"
         );
+    }
+
+    /// Verifies that `load_resource_section` iterates past non-HII named entries to find the HII entry.
+    ///
+    /// The resource section constructed in the test has two named entries: "ABC" (first) and "HII" (second).
+    /// Note: This test creates a .rsrc section in-memory because there is not a known image that has multiple
+    ///       named entries with the HII entry not being the first entry.
+    #[test]
+    fn test_load_resource_section_finds_hii_when_not_first_entry() {
+        test_support::init_test_logger();
+
+        // Build a .rsrc section with 2 named entries.
+        //
+        // From the PE/COFF spec:
+        //
+        //   The resource directory string area consists of Unicode strings, which are word-aligned. These
+        //   strings are stored together after the last Resource Directory entry and before the first
+        //   Resource Data entry.
+        //
+        // Layout:
+        //   0x00: Directory (16 bytes) — 2 named entries, 0 id entries
+        //   0x10: Entry[0] (8 bytes)   — named "ABC" at string offset 0x30
+        //   0x18: Entry[1] (8 bytes)   — named "HII" at string offset 0x38, data at 0x40
+        //   0x20: (padding, 16 bytes)
+        //   0x30: DirectoryString "ABC" — length=3, then "ABC" (8 bytes)
+        //   0x38: DirectoryString "HII" — length=3, then "HII" (8 bytes)
+        //   0x40: DataEntry (16 bytes)  — offset_to_data=0xABCD, size=0x100
+        //
+        // Structure definitions:
+        //   - Directory: https://learn.microsoft.com/windows/win32/debug/pe-format#resource-directory-table
+        //   - Entry: https://learn.microsoft.com/windows/win32/debug/pe-format#resource-directory-entries
+        //   - DirectoryString: https://learn.microsoft.com/windows/win32/debug/pe-format#resource-directory-entries
+        let mut rsrc = vec![0u8; 0x50];
+
+        // Directory header at 0x00
+        rsrc[12] = 2; // number_of_named_entries = 2
+
+        // Entry[0] at 0x10: "ABC" — id=0x80000030 (name_is_string + offset 0x30)
+        rsrc[0x10..0x14].copy_from_slice(&0x8000_0030u32.to_le_bytes());
+        // data=0x00000000 (not a directory, won't be reached since "ABC" != "HII")
+        rsrc[0x14..0x18].copy_from_slice(&0x0000_0000u32.to_le_bytes());
+
+        // Entry[1] at 0x18: "HII" — id=0x80000038 (name_is_string + offset 0x38)
+        rsrc[0x18..0x1C].copy_from_slice(&0x8000_0038u32.to_le_bytes());
+        // data=0x00000040 (not a directory, points to DataEntry at 0x40)
+        rsrc[0x1C..0x20].copy_from_slice(&0x0000_0040u32.to_le_bytes());
+
+        // DirectoryString "ABC" at 0x30: length=3
+        rsrc[0x30..0x32].copy_from_slice(&3u16.to_le_bytes());
+        // "ABC" (UTF-16LE) = [0x46, 0x00, 0x4F, 0x00, 0x4F, 0x00]
+        rsrc[0x32..0x38].copy_from_slice(&[0x46, 0x00, 0x4F, 0x00, 0x4F, 0x00]);
+
+        // DirectoryString "HII" at 0x38: length=3
+        rsrc[0x38..0x3A].copy_from_slice(&3u16.to_le_bytes());
+        // "HII" (UTF-16LE) = [0x48, 0x00, 0x49, 0x00, 0x49, 0x00]
+        rsrc[0x3A..0x40].copy_from_slice(&[0x48, 0x00, 0x49, 0x00, 0x49, 0x00]);
+
+        // DataEntry at 0x40: offset_to_data=0xABCD, size=0x100
+        rsrc[0x40..0x44].copy_from_slice(&0x0000_ABCDu32.to_le_bytes());
+        rsrc[0x44..0x48].copy_from_slice(&0x0000_0100u32.to_le_bytes());
+
+        let mut pe_info = UefiPeInfo::default();
+        pe_info.sections.push(goblin::pe::section_table::SectionTable {
+            name: *b".rsrc\0\0\0",
+            virtual_size: rsrc.len() as u32,
+            size_of_raw_data: rsrc.len() as u32,
+            pointer_to_raw_data: 0,
+            ..Default::default()
+        });
+
+        let result = load_resource_section(&pe_info, &rsrc).unwrap();
+        assert_eq!(result, Some((0xABCD, 0x100)));
     }
 }
