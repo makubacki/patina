@@ -33,6 +33,9 @@ This RFC proposes a process for releasing Patina crates.
   - Add guidance in the Branching section for merging a feature branch into the main branch.
 - 2026-02-26:
   - Update the `major` branch section to indicate that the major branch process is being evaluated.
+- 2026-04-02:
+  - Update the `major` branch section to give guidance for preserving release notes from the `major` branch when
+    it is merged into `main`.
 
 ## Motivation
 
@@ -231,6 +234,39 @@ The following changes are considered **breaking** and may require a major versio
   - **PR Title Convention for PRs Into a Major Branch**: `[major] <PR Title>`
     - For example, a PR for "Change ABC" into the `major` branch would be titled as: `[major] Change ABC`
   - PR requirements into `major` are the exact same as those to the `main` branch.
+  - Patina autogenerates release notes based on PR titles and descriptions. In order to preserve the pull request
+    descriptions for changes that were made into the `major` branch, individual sections of the PR descriptions are
+    merged into respective sections of the PR description for the PR that merges `major` into `main`. This way, the
+    release notes for the release made from the `main` branch after the merge will include the descriptions of the
+    individual breaking changes that were made in the `major` branch.
+
+    ```md
+    ## Description
+
+    ### <PR Number as link>: <PR title>
+
+    <copy + paste PR description>
+
+    ### <PR Number as link>: <PR title>
+
+    <copy + paste PR description>
+
+    ## How this was tested
+
+    <How this exact PR was tested, e.g. the total culmination of all cherry-picks>
+
+    ## Integration Instructions
+
+    ### <PR Number as link>: <PR title>
+
+    <copy + paste integration instructions>
+
+    ### <PR Number as link>: <PR title>
+
+    <copy + paste integration instructions>
+    ```
+
+    - Tip: The original markdown of each pull request is available by clicking "edit" on the pull request description.
 
 ```mermaid
  ---
