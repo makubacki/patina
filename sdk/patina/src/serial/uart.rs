@@ -125,11 +125,29 @@ cfg_if::cfg_if! {
 
 cfg_if::cfg_if! {
     if #[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "aarch64")))] {
-        mod uart_pl011 {
-            pub const FLAG_REGISTER_OFFSET: usize = 0x18;
-            pub const FR_BUSY: u8 = 1 << 3;
-            pub const FR_RXFE: u8 = 1 << 4;
-            pub const FR_TXFF: u8 = 1 << 5;
+        use core::ptr::NonNull;
+        use safe_mmio::{field, fields::{ReadPure, ReadWrite}, UniqueMmioPointer};
+
+        /// PL011 flag register bit: UART busy.
+        const FR_BUSY: u8 = 1 << 3;
+        /// PL011 flag register bit: receive FIFO empty.
+        const FR_RXFE: u8 = 1 << 4;
+        /// PL011 flag register bit: transmit FIFO full.
+        const FR_TXFF: u8 = 1 << 5;
+
+        /// PL011 MMIO register block.
+        ///
+        /// Models the Data Register (DR) at offset 0x00 and the Flag Register (FR) at offset 0x18.
+        /// Intermediate registers are represented as reserved padding.
+        #[repr(C)]
+        struct Pl011Registers {
+            /// Data Register: reading pops from receive FIFO (side-effect), writing pushes to
+            /// transmit FIFO.
+            dr: ReadWrite<u8>,
+            /// Reserved registers between DR (0x00) and FR (0x18).
+            _reserved: [u8; 0x17],
+            /// Flag Register: reading has no side-effects (pure status bits).
+            fr: ReadPure<u8>,
         }
 
         /// An interface for writing to a UartPl011 device.
@@ -145,52 +163,54 @@ cfg_if::cfg_if! {
             ///
             /// # Safety
             ///
-            /// The given base address must point to the 8 MMIO control registers of a
+            /// The given base address must point to the MMIO control registers of a
             /// PL011 device, which must be mapped into the address space of the process
             /// as device memory and not have any other aliases.
             pub const fn new(base_address: usize) -> Self {
                 Self { base_address }
             }
 
+            /// Returns a [`UniqueMmioPointer`] to the PL011 register block.
+            ///
+            /// # Safety
+            ///
+            /// The caller must ensure that no other `UniqueMmioPointer` to the same
+            /// MMIO region exists for the duration of the returned pointer's use.
+            unsafe fn registers(&self) -> UniqueMmioPointer<'_, Pl011Registers> {
+                // SAFETY: The base address is required by the safety contract of new() to point
+                // to a PL011 register block that is mapped as device memory.
+                unsafe {
+                    UniqueMmioPointer::new(NonNull::new(self.base_address as *mut Pl011Registers).unwrap())
+                }
+            }
+
             /// Writes a single byte to the UART.
             pub fn write_byte(&self, byte: u8) {
-                // Wait until there is room in the TX buffer.
-                while self.read_flag_register() & uart_pl011::FR_TXFF != 0 {}
+                // SAFETY: Exclusive MMIO access is given by calling `UartPl011::new`.
+                let mut regs = unsafe { self.registers() };
 
-                // SAFETY: We know that the base address points to the control
-                // registers of a PL011 device which is appropriately mapped.
-                unsafe {
-                    // Write to the TX buffer.
-                    self.get_base().write_volatile(byte);
-                }
+                // Wait until there is room in the TX buffer.
+                while field!(regs, fr).read() & FR_TXFF != 0 {}
+
+                // Write to the TX buffer.
+                field!(regs, dr).write(byte);
 
                 // Wait until the UART is no longer busy.
-                while self.read_flag_register() & uart_pl011::FR_BUSY != 0 {}
+                while field!(regs, fr).read() & FR_BUSY != 0 {}
             }
 
             /// Reads a single byte from the UART.
             pub fn read_byte(&self) -> Option<u8> {
-                // Wait until the RX buffer is not empty.
-                if self.read_flag_register() & uart_pl011::FR_RXFE != 0 {
+                // SAFETY: Exclusive MMIO access is given by calling `UartPl011::new`.
+                let mut regs = unsafe { self.registers() };
+
+                // Check if the RX buffer is empty.
+                if field!(regs, fr).read() & FR_RXFE != 0 {
                     return None;
                 }
 
-                // SAFETY: We know that the base address points to the control
-                // registers of a PL011 device which is appropriately mapped.
-                unsafe {
-                    // Read from the RX buffer.
-                    Some(self.get_base().read_volatile())
-                }
-            }
-
-            fn read_flag_register(&self) -> u8 {
-                // SAFETY: We know that the base address points to the control
-                // registers of a PL011 device which is appropriately mapped.
-                unsafe { self.get_base().add(uart_pl011::FLAG_REGISTER_OFFSET).read_volatile() }
-            }
-
-            fn get_base(&self) -> *mut u8 {
-                self.base_address as *mut u8
+                // Read from the RX buffer.
+                Some(field!(regs, dr).read())
             }
         }
 

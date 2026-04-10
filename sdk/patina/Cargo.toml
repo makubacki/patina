@@ -39,6 +39,7 @@ mu_rust_helpers = { workspace = true, optional = true }
 num-traits = { workspace = true }
 indoc = { workspace = true }
 fallible-streaming-iterator = { workspace = true }
+safe-mmio = { workspace = true }
 linkme = { workspace = true }
 scroll = { workspace = true }
 uuid = { workspace = true }
