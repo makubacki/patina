@@ -60,3 +60,10 @@ pub mod serial;
 pub mod tpl_mutex;
 #[cfg(any(test, feature = "alloc"))]
 pub mod uefi_protocol;
+
+/// Re-export of the [`safe-mmio`](https://crates.io/crates/safe-mmio) crate.
+///
+/// Consumers should use `patina::mmio` instead of depending on `safe-mmio` directly.
+pub mod mmio {
+    pub use safe_mmio::*;
+}

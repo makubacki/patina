@@ -126,7 +126,7 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "aarch64")))] {
         use core::ptr::NonNull;
-        use safe_mmio::{field, fields::{ReadPure, ReadWrite}, UniqueMmioPointer};
+        use crate::mmio::{field, fields::{ReadPure, ReadWrite}, UniqueMmioPointer};
 
         /// PL011 flag register bit: UART busy.
         const FR_BUSY: u8 = 1 << 3;

@@ -3,6 +3,14 @@
 This page explains the soundness problems with naive MMIO access in Rust and why Patina uses the
 [`safe-mmio`](https://crates.io/crates/safe-mmio) crate.
 
+The `patina` crate re-exports `safe-mmio` through a `patina::mmio` wrapper module. All Patina code should
+import from `patina::mmio` rather than depending on `safe-mmio` directly. This:
+
+1. Allows consumers to use the crate without adding `safe-mmio` as a direct dependency.
+2. Reduces the likelihood of the same crate being compiled multiple times with different versions.
+
+Crates that already depend on `patina` should not add `safe-mmio` to their own `Cargo.toml`.
+
 ## The Problem with References to MMIO Space
 
 In C, casting an address to a pointer and performing volatile reads/writes is the standard way to access device
