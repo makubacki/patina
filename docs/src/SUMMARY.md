@@ -25,6 +25,8 @@
 - [Documenting](dev/documenting.md)
   - [Quick Reference](dev/documenting/reference.md)
 - [Formatting](dev/formatting.md)
+- [Hardware Access](dev/hardware_access.md)
+  - [Memory-Mapped I/O (MMIO)](dev/hardware_access/mmio.md)
 - [Other Resources](dev/other.md)
 - [Process for Unstable Features](dev/unstable.md)
 - [RFC Template](rfc/template.md)
