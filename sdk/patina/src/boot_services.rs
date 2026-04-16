@@ -229,7 +229,7 @@ pub trait BootServices {
                 notify_tpl,
                 mem::transmute::<
                     Option<extern "efiapi" fn(*mut c_void, T)>,
-                    extern "efiapi" fn(*mut c_void, *mut <T as c_ptr::CPtr<'_>>::Type),
+                    Option<extern "efiapi" fn(*mut c_void, *mut <T as c_ptr::CPtr<'_>>::Type)>,
                 >(notify_function),
                 notify_context.into_ptr() as *mut <T as CPtr>::Type,
                 event_group,
@@ -246,7 +246,7 @@ pub trait BootServices {
         &self,
         event_type: EventType,
         notify_tpl: Tpl,
-        notify_function: EventNotifyCallback<*mut T>,
+        notify_function: Option<EventNotifyCallback<*mut T>>,
         notify_context: *mut T,
         event_group: &'static efi::Guid,
     ) -> Result<efi::Event, efi::Status>;
@@ -1029,7 +1029,7 @@ impl BootServices for StandardBootServices {
         &self,
         event_type: EventType,
         notify_tpl: Tpl,
-        notify_function: EventNotifyCallback<*mut T>,
+        notify_function: Option<EventNotifyCallback<*mut T>>,
         notify_context: *mut T,
         event_group: &'static efi::Guid,
     ) -> Result<efi::Event, efi::Status> {
@@ -1041,10 +1041,9 @@ impl BootServices for StandardBootServices {
             notify_tpl.into(),
             // Safety: Transmuting function pointer types with matching ABIs and compatible signatures.
             // Both are extern "efiapi" callbacks - the generic parameter T is erased to c_void for FFI.
-            // Wrapping in Option as the UEFI interface expects an optional callback.
             unsafe {
                 mem::transmute::<
-                    extern "efiapi" fn(*mut c_void, *mut T),
+                    Option<extern "efiapi" fn(*mut c_void, *mut T)>,
                     Option<extern "efiapi" fn(*mut c_void, *mut c_void)>,
                 >(notify_function)
             },
