@@ -523,10 +523,10 @@ pub trait BootServices {
             }
             Some(i) => Ok(i),
             None => {
-                static ZERO_SIZE_TYPE: () = ();
-                // SAFETY: Zero-sized types (ZSTs) don't require valid memory addresses.
-                // ZERO_SIZE_TYPE provides a stable address for the cast to maintain type safety.
-                Ok(unsafe { (ptr::addr_of!(ZERO_SIZE_TYPE) as *mut T).as_mut().unwrap() })
+                // SAFETY: T is a ZST (size == 0). NonNull::dangling() returns a well-aligned,
+                // non-null pointer. For ZSTs, reads/writes are zero-sized accesses. Each call
+                // produces its own reference, avoiding aliasing violations.
+                Ok(unsafe { NonNull::<T>::dangling().as_mut() })
             }
         }
     }
@@ -606,10 +606,10 @@ pub trait BootServices {
             }
             Some(i) => Ok(i),
             None => {
-                static ZERO_SIZE_TYPE: () = ();
-                // SAFETY: Zero-sized types (ZSTs) don't require valid memory addresses.
-                // ZERO_SIZE_TYPE provides a stable address for the cast to maintain type safety.
-                Ok(unsafe { (ptr::addr_of!(ZERO_SIZE_TYPE) as *mut T).as_mut().unwrap() })
+                // SAFETY: T is a ZST (size == 0). NonNull::dangling() returns a well-aligned,
+                // non-null pointer. For ZSTs, reads/writes are zero-sized accesses. Each call
+                // produces its own reference, avoiding aliasing violations.
+                Ok(unsafe { NonNull::<T>::dangling().as_mut() })
             }
         }
     }
@@ -746,10 +746,10 @@ pub trait BootServices {
             }
             Some(i) => Ok(i),
             None => {
-                static ZERO_SIZE_TYPE: () = ();
-                // SAFETY: Zero-sized types (ZSTs) don't require valid memory addresses.
-                // ZERO_SIZE_TYPE provides a stable address for the cast to maintain type safety.
-                Ok(unsafe { (ptr::addr_of!(ZERO_SIZE_TYPE) as *mut T).as_mut().unwrap() })
+                // SAFETY: T is a ZST (size == 0). NonNull::dangling() returns a well-aligned,
+                // non-null pointer. For ZSTs, reads/writes are zero-sized accesses. Each call
+                // produces its own reference, avoiding aliasing violations.
+                Ok(unsafe { NonNull::<T>::dangling().as_mut() })
             }
         }
     }
