@@ -62,13 +62,13 @@ impl EfiCpuX64 {
     }
 
     fn initialize_gdt(&self) {
-        #[cfg(all(not(test), target_arch = "x86_64"))]
+        #[cfg(not(test))]
         gdt::init();
     }
 
     // X64 related asm functions
     fn asm_wbinvd(&self) {
-        #[cfg(all(not(test), target_arch = "x86_64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: The caller is expected to ensure that they want to write back and invalidate the cache
             unsafe {
@@ -78,7 +78,7 @@ impl EfiCpuX64 {
     }
 
     fn asm_invd(&self) {
-        #[cfg(all(not(test), target_arch = "x86_64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: The caller is expected to ensure that they want to invalidate the cache without writing back
             unsafe {
@@ -96,7 +96,7 @@ impl EfiCpuX64 {
     // This routine only does bare-metal hardware access, so no coverage.
     #[coverage(off)]
     pub fn sleep() {
-        #[cfg(all(not(test), target_arch = "x86_64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: The caller is expected to ensure that they want to halt the CPU until the next interrupt
             unsafe {
@@ -110,7 +110,7 @@ impl EfiCpuX64 {
     }
 
     fn initialize_fpu(&self) {
-        #[cfg(all(not(test), target_arch = "x86_64"))]
+        #[cfg(not(test))]
         // SAFETY: This assembly writes only hard coded values to CR4 register, and MMX and FPU control words. No
         // inputs are used that could violate memory safety.
         unsafe {

@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use crate::cpu::Cpu;
-#[cfg(all(not(test), target_arch = "aarch64"))]
+#[cfg(not(test))]
 use core::arch::asm;
 use patina::{
     error::EfiError,
@@ -48,7 +48,7 @@ impl EfiCpuAarch64 {
             }
         }
 
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         {
             // we have a data barrier after all cache lines have had the operation performed on them as an optimization
             // SAFETY: a data barrier has no impact on safety invariants.
@@ -59,7 +59,7 @@ impl EfiCpuAarch64 {
     }
 
     fn clean_data_entry_by_mva(&self, _mva: efi::PhysicalAddress) {
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: Cleaning the data cache has no impact on safety invariants.
             unsafe {
@@ -69,7 +69,7 @@ impl EfiCpuAarch64 {
     }
 
     fn invalidate_data_cache_entry_by_mva(&self, _mva: efi::PhysicalAddress) {
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: Invalidating the data cache does not impact safety checks. It
             // does have the potential to corrupt memory if used incorrectly, but the caller is
@@ -81,7 +81,7 @@ impl EfiCpuAarch64 {
     }
 
     fn clean_and_invalidate_data_entry_by_mva(&self, _mva: efi::PhysicalAddress) {
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: Cleaning and invalidating the data cache does not impact safety invariants.
             unsafe {
@@ -92,7 +92,7 @@ impl EfiCpuAarch64 {
 
     fn data_cache_line_len(&self) -> u64 {
         cfg_if::cfg_if! {
-            if #[cfg(all(not(test), target_arch = "aarch64"))]  {
+            if #[cfg(not(test))]  {
                 // SAFETY: Reading ctr_el0 has no impact on safety invariants.
                 let ctr_el0 = unsafe {
                     let ctr_el0: u64;
@@ -101,7 +101,7 @@ impl EfiCpuAarch64 {
                 };
                 4 << ((ctr_el0 >> 16) & 0xf)
             } else {
-                // For test mode or non-aarch64 platforms, return 64 bytes
+                // For test mode, return 64 bytes
                 64_u64
             }
         }
@@ -111,7 +111,7 @@ impl EfiCpuAarch64 {
     // This routine only does bare-metal hardware access, so no coverage.
     #[coverage(off)]
     pub fn sleep() {
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         {
             // SAFETY: The caller is expected to ensure that they want to wait for an interrupt
             unsafe {
