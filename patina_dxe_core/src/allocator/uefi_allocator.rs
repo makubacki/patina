@@ -70,23 +70,14 @@ where
         self.memory_type
     }
 
-    /// Reserves a range of memory to be used by this allocator of the given size in pages.
+    /// Sets the reserved memory range (bin range) for this allocator.
     ///
-    /// The caller specifies a maximum number of pages this allocator is expected to require, and as long as the number
-    /// of pages actually used by the allocator is less than that amount, then all the allocations for this allocator
-    /// will be in a single contiguous block. This capability can be used to ensure that the memory map presented to the
-    /// OS is stable from boot-to-boot despite small boot-to-boot variations in actual page usage.
+    /// ## Errors
     ///
-    /// For best memory stability, this routine should be called only during the initialization of the memory subsystem;
-    /// calling it after other allocations/frees have occurred will not cause allocation errors, but may cause the
-    /// memory map to vary from boot-to-boot.
-    ///
-    /// This routine will return Err(efi::Status::ALREADY_STARTED) if it is called more than once.
-    ///
-    pub fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError> {
-        self.allocator.reserve_memory_pages(pages)
+    /// Returns [`EfiError::AlreadyStarted`] if a reserved range has already been set.
+    pub fn set_reserved_range(&self, range: Range<efi::PhysicalAddress>) -> Result<(), EfiError> {
+        self.allocator.set_reserved_range(range)
     }
-
     /// Returns an iterator over the memory ranges managed by this allocator.
     /// Returns an empty iterator if the allocator has no memory ranges.
     pub(crate) fn get_memory_ranges(&self) -> impl Iterator<Item = Range<efi::PhysicalAddress>> {
@@ -286,8 +277,9 @@ mod tests {
     use std::alloc::{GlobalAlloc, System};
 
     use patina::{
-        base::{SIZE_4KB, SIZE_64KB, UEFI_PAGE_SIZE},
+        base::{SIZE_4KB, SIZE_64KB, UEFI_PAGE_SIZE, align_up, page_shift_from_alignment},
         pi::dxe_services,
+        uefi_pages_to_size, uefi_size_to_pages,
     };
 
     use crate::{
@@ -669,6 +661,31 @@ mod tests {
         });
     }
 
+    /// Allocates a GCD region with ownership preservation and sets it as the allocator's reserved range.
+    fn setup_reserved_range(
+        gcd: &SpinLockedGcd,
+        allocator: &UefiAllocator<SpinLockedFixedSizeBlockAllocator>,
+        pages: usize,
+        granularity: usize,
+    ) -> Range<efi::PhysicalAddress> {
+        let required_pages = align_up(pages, uefi_size_to_pages!(granularity)).unwrap();
+        let size = uefi_pages_to_size!(required_pages);
+        let addr = gcd
+            .allocate_memory_space(
+                DEFAULT_ALLOCATION_STRATEGY,
+                dxe_services::GcdMemoryType::SystemMemory,
+                page_shift_from_alignment(granularity).unwrap(),
+                size,
+                allocator.handle(),
+                None,
+            )
+            .unwrap();
+        gcd.free_memory_space_preserving_ownership(addr, size).unwrap();
+        let range = addr as efi::PhysicalAddress..(addr + size) as efi::PhysicalAddress;
+        allocator.set_reserved_range(range.clone()).unwrap();
+        range
+    }
+
     #[test]
     fn reserve_memory_pages_reserves_the_pages() {
         with_granularity_modulation(|granularity| {
@@ -686,7 +703,7 @@ mod tests {
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
                 let reserved_allocator = UefiAllocator::new(reserved_fsb, efi::RUNTIME_SERVICES_DATA);
-                reserved_allocator.reserve_memory_pages(0x100).unwrap();
+                setup_reserved_range(&GCD, &reserved_allocator, 0x100, granularity);
 
                 let unreserved_fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
@@ -780,6 +797,48 @@ mod tests {
                     assert!(reserved_range.contains(&(reserved_page_addr)));
                     assert!(reserved_range.contains(&(reserved_page_addr + 0xFFF)));
                 }
+            });
+        });
+    }
+
+    #[test]
+    fn allocate_max_address_prefers_reserved_range() {
+        with_granularity_modulation(|granularity| {
+            with_locked_state(|| {
+                static GCD: SpinLockedGcd = SpinLockedGcd::new(None);
+
+                let base = init_gcd(&GCD, 0x400000);
+                let gcd_end = base + 0x400000;
+
+                let reserved_fsb = SpinLockedFixedSizeBlockAllocator::new(
+                    &GCD,
+                    1 as _,
+                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    granularity,
+                    LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
+                );
+                let reserved_allocator = UefiAllocator::new(reserved_fsb, efi::RUNTIME_SERVICES_DATA);
+                let reserved_range = setup_reserved_range(&GCD, &reserved_allocator, 0x100, granularity);
+
+                // TopDown(Some(max)) where max is above the reserved range should land in the bin.
+                let page = reserved_allocator
+                    .allocate_pages(AllocationStrategy::TopDown(Some(gcd_end as usize)), 1, UEFI_PAGE_SIZE)
+                    .unwrap();
+                let page_addr = page.as_ptr() as *mut u8 as u64;
+                assert!(
+                    reserved_range.contains(&page_addr),
+                    "TopDown(Some(gcd_end)) should land in the bin: addr={page_addr:#x}, range={reserved_range:#x?}",
+                );
+
+                // TopDown(Some(max)) where max is below the reserved range must not try the bin.
+                let page_below = reserved_allocator
+                    .allocate_pages(AllocationStrategy::TopDown(Some(reserved_range.start as usize)), 1, UEFI_PAGE_SIZE)
+                    .unwrap();
+                let page_below_addr = page_below.as_ptr() as *mut u8 as u64;
+                assert!(
+                    !reserved_range.contains(&page_below_addr),
+                    "TopDown(Some(below_bin)) should not land in the bin: addr={page_below_addr:#x}, range={reserved_range:#x?}",
+                );
             });
         });
     }

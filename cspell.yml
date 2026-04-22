@@ -43,6 +43,7 @@ words:
   - autocfg
   - bitvec
   - bootx
+  - bsdata
   - bucketize
   - bumpalo
   - cbindgen

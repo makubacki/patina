@@ -315,30 +315,22 @@ impl FixedSizeBlockAllocator {
         }
     }
 
-    /// Informs the allocator of it's reserved memory range.
+    /// Sets the reserved memory range (bin range) for this allocator.
     ///
-    /// This function is intended to be called on a region of memory that has been marked with a backing memory allocator
-    /// as reserved for this allocator. Calling this funcion does not itself reserve the region of memory.
+    /// ## Errors
     ///
-    /// ## Safety
-    ///
-    /// The range must not overlap with any existing allocations.
-    pub fn set_reserved_range(&mut self, range: NonNull<[u8]>) -> Result<(), EfiError> {
+    /// Returns [`EfiError::AlreadyStarted`] if a reserved range has already been set.
+    pub fn set_reserved_range(&mut self, range: Range<efi::PhysicalAddress>) -> Result<(), EfiError> {
         if self.reserved_range.is_some() {
             Err(EfiError::AlreadyStarted)?;
         }
 
-        self.reserved_range = Some(
-            range.addr().get() as efi::PhysicalAddress
-                ..range.addr().get() as efi::PhysicalAddress + range.len() as efi::PhysicalAddress,
-        );
-
-        self.stats.reserved_size = range.len();
+        let size = (range.end - range.start) as usize;
+        self.reserved_range = Some(range);
+        self.stats.reserved_size = size;
         self.stats.reserved_used = 0;
-        self.stats.claimed_pages += uefi_size_to_pages!(range.len());
+        self.stats.claimed_pages += uefi_size_to_pages!(size);
 
-        // call into the page change callback to keep track of the updated reserved stats and
-        // any memory map changes made when reserving the range.
         self.update_memory_type_info();
 
         Ok(())
@@ -561,15 +553,7 @@ impl SpinLockedFixedSizeBlockAllocator {
         // Page allocations and pool allocations are disjoint; page allocations are allocated directly from the GCD and are
         // freed straight back to GCD. As such, a tracking allocator structure is not required.
         let start_address = self
-            .gcd
-            .allocate_memory_space(
-                allocation_strategy,
-                GcdMemoryType::SystemMemory,
-                align_shift,
-                uefi_pages_to_size!(required_pages),
-                self.handle,
-                None,
-            )
+            .allocate_from_gcd(allocation_strategy, align_shift, uefi_pages_to_size!(required_pages))
             .map_err(|err| match err {
                 EfiError::InvalidParameter | EfiError::NotFound => err,
                 _ => EfiError::OutOfResources,
@@ -633,49 +617,66 @@ impl SpinLockedFixedSizeBlockAllocator {
         Ok(())
     }
 
-    /// Reserves a range of memory to be used by this allocator of the given size in pages.
+    /// Sets the reserved memory range (bin range) for this allocator.
     ///
-    /// The caller specifies a maximum number of pages this allocator is expected to require, and as long as the number
-    /// of pages actually used by the allocator is less than that amount, then all the allocations for this allocator
-    /// will be in a single contiguous block. This capability can be used to ensure that the memory map presented to the
-    /// OS is stable from boot-to-boot despite small boot-to-boot variations in actual page usage.
+    /// See [`FixedSizeBlockAllocator::set_reserved_range()`] for details on the accounting model.
     ///
-    /// For best memory stability, this routine should be called only during the initialization of the memory subsystem;
-    /// calling it after other allocations/frees have occurred will not cause allocation errors, but may cause the
-    /// memory map to vary from boot-to-boot.
+    /// ## Errors
     ///
-    /// This routine will return Err(efi::Status::ALREADY_STARTED) if it is called more than once.
+    /// Returns [`EfiError::AlreadyStarted`] if a reserved range has already been set.
+    pub fn set_reserved_range(&self, range: Range<efi::PhysicalAddress>) -> Result<(), EfiError> {
+        self.lock().set_reserved_range(range)
+    }
+
+    /// Attempts to allocate from the GCD, preferring the reserved (bin) range if one exists.
     ///
-    pub fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError> {
-        if self.lock().reserved_range.is_some() {
-            Err(EfiError::AlreadyStarted)?;
+    /// For strategies that do not exclude the bin range, this first tries to allocate within the
+    /// bin range so that special-type pages land in their designated bin. Specifically, bin
+    /// preference is attempted for:
+    /// - `TopDown(None)` / `BottomUp(None)`: fully unconstrained strategies.
+    /// - `TopDown(Some(max))` / `BottomUp(Some(max))`: constrained strategies where `max` is at
+    ///   or above the bin range end, meaning the bin is reachable.
+    ///
+    /// `Address(addr)` strategies are never redirected because the caller requires an exact address.
+    ///
+    /// If the bin is full or no bin exists, the allocation falls through to the original strategy.
+    fn allocate_from_gcd(
+        &self,
+        strategy: AllocationStrategy,
+        align_shift: usize,
+        size: usize,
+    ) -> Result<usize, EfiError> {
+        let reserved_range = self.lock().reserved_range.clone();
+
+        // Determine whether to attempt bin-preference allocation.
+        let try_bin = match strategy {
+            AllocationStrategy::TopDown(None) | AllocationStrategy::BottomUp(None) => true,
+            AllocationStrategy::TopDown(Some(max)) | AllocationStrategy::BottomUp(Some(max)) => {
+                if let Some(ref reserved) = reserved_range { max as u64 >= reserved.start + size as u64 } else { false }
+            }
+            _ => false,
+        };
+
+        if try_bin
+            && let Some(ref reserved) = reserved_range
+            && let Ok(addr) = self.gcd.allocate_memory_space(
+                AllocationStrategy::TopDown(Some(reserved.end as usize)),
+                GcdMemoryType::SystemMemory,
+                align_shift,
+                size,
+                self.handle,
+                None,
+            )
+        {
+            if addr >= reserved.start as usize {
+                return Ok(addr);
+            }
+            // Landed below the bin, free and fall through.
+            let _ = self.gcd.free_memory_space(addr, size);
         }
 
-        // Even though the platform is telling us what the memory buckets are, we have to take into account
-        // architecture-specific requirements for runtime page allocation granularity.
-        let granularity = self.lock().page_allocation_granularity;
-
-        // Ensure that the requested number of pages is a multiple of the granularity
-        let required_pages = align_up(pages, uefi_size_to_pages!(granularity))?;
-
-        let reserved_block_len = uefi_pages_to_size!(required_pages);
-
-        // Allocate then free a block of the requested length in the GCD while preserving ownership.
-        // This, in effect, reserves this region in the GCD for use by this allocator.
-        let reserved_block_addr = self.gcd.allocate_memory_space(
-            DEFAULT_ALLOCATION_STRATEGY,
-            GcdMemoryType::SystemMemory,
-            page_shift_from_alignment(granularity)?,
-            reserved_block_len,
-            self.handle,
-            None,
-        )?;
-        self.gcd.free_memory_space_preserving_ownership(reserved_block_addr, reserved_block_len)?;
-
-        self.lock().set_reserved_range(NonNull::slice_from_raw_parts(
-            NonNull::new(reserved_block_addr as *mut u8).ok_or(EfiError::OutOfResources)?,
-            reserved_block_len,
-        ))
+        // Normal allocation path.
+        self.gcd.allocate_memory_space(strategy, GcdMemoryType::SystemMemory, align_shift, size, self.handle, None)
     }
 
     /// Returns an iterator of the ranges of memory owned by this allocator
@@ -755,17 +756,13 @@ unsafe impl Allocator for SpinLockedFixedSizeBlockAllocator {
                 // Allocate additional memory through the GCD, returning AllocError
                 // if the GCD returns an error
                 let start_address: usize = self
-                    .gcd
-                    .allocate_memory_space(
+                    .allocate_from_gcd(
                         DEFAULT_ALLOCATION_STRATEGY,
-                        GcdMemoryType::SystemMemory,
                         page_shift_from_alignment(required_alignment).map_err(|_| {
                             debug_assert!(false);
                             AllocError
                         })?,
                         allocation_size,
-                        self.handle,
-                        None,
                     )
                     .map_err(|err| {
                         log::error!(
@@ -838,8 +835,8 @@ impl PageAllocator for SpinLockedFixedSizeBlockAllocator {
         unsafe { Self::free_pages(self, address, pages) }
     }
 
-    fn reserve_memory_pages(&self, pages: usize) -> Result<(), EfiError> {
-        Self::reserve_memory_pages(self, pages)
+    fn set_reserved_range(&self, range: Range<efi::PhysicalAddress>) -> Result<(), EfiError> {
+        Self::set_reserved_range(self, range)
     }
 
     fn get_memory_ranges(&self) -> alloc::vec::IntoIter<Range<usize>> {
@@ -1676,19 +1673,7 @@ mod tests {
             assert_eq!(stats.reserved_used, 0);
             assert_eq!(stats.claimed_pages, 0);
 
-            //reserve some space and check the stats.
-            fsb.reserve_memory_pages(uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2)).unwrap();
-
-            let stats = fsb.stats();
-            assert_eq!(stats.pool_allocation_calls, 0);
-            assert_eq!(stats.pool_free_calls, 0);
-            assert_eq!(stats.page_allocation_calls, 0);
-            assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, 0);
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
-
-            //test alloc/deallocate and stats within the bucket
+            //test alloc/deallocate and stats
             // SAFETY: fsb is initialized and used with a valid layout for testing.
             let ptr = unsafe {
                 fsb.alloc(
@@ -1702,9 +1687,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 0);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            let initial_claimed = stats.claimed_pages;
 
             // SAFETY: Allocation was returned by fsb for this layout.
             unsafe {
@@ -1717,9 +1702,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 1);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 2));
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, initial_claimed);
 
             //test alloc/deallocate and stats blowing the bucket
             // SAFETY: fsb is initialized and used with a valid layout in tests.
@@ -1737,9 +1722,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 1);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            let claimed_after_3mb = stats.claimed_pages;
 
             // SAFETY: Allocation was returned by fsb for this layout.
             unsafe {
@@ -1757,9 +1742,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 0);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb);
 
             // test that a small page allocation fits in the 1MB free reserved region.
             let ptr = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x4, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1776,9 +1761,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 1);
             assert_eq!(stats.page_free_calls, 0);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(5));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb + 0x4);
 
             // SAFETY: free_pages uses a valid test allocation pointer and page count.
             unsafe {
@@ -1796,9 +1781,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 1);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb);
 
             //test that a lage page allocation results in more claimed pages.
             let ptr = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x104, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1815,9 +1800,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 2);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1 + 0x104);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb + 0x104);
 
             // test that a small page allocation fits in the 1MB free reserved region.
             let ptr1 = fsb.allocate_pages(DEFAULT_ALLOCATION_STRATEGY, 0x4, UEFI_PAGE_SIZE).unwrap().as_ptr();
@@ -1835,9 +1820,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 3);
             assert_eq!(stats.page_free_calls, 1);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(5));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1 + 0x104);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb + 0x104 + 0x4);
 
             // SAFETY: free_pages uses a valid test allocation pointer and page count.
             unsafe {
@@ -1859,9 +1844,9 @@ mod tests {
             assert_eq!(stats.pool_free_calls, 2);
             assert_eq!(stats.page_allocation_calls, 3);
             assert_eq!(stats.page_free_calls, 3);
-            assert_eq!(stats.reserved_size, TEST_MIN_EXPANSION_SIZE * 2);
-            assert_eq!(stats.reserved_used, TEST_MIN_EXPANSION_SIZE + uefi_pages_to_size!(1));
-            assert_eq!(stats.claimed_pages, uefi_size_to_pages!(TEST_MIN_EXPANSION_SIZE * 5) + 1);
+            assert_eq!(stats.reserved_size, 0);
+            assert_eq!(stats.reserved_used, 0);
+            assert_eq!(stats.claimed_pages, claimed_after_3mb);
         });
     }
 
