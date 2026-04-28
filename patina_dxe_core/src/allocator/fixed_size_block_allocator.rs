@@ -28,7 +28,7 @@ use core::{
 };
 use linked_list_allocator::{align_down_size, align_up_size};
 use patina::{
-    base::{UEFI_PAGE_SHIFT, UEFI_PAGE_SIZE, align_up},
+    base::{UEFI_PAGE_SIZE, align_up, page_shift_from_alignment},
     error::EfiError,
     pi::{dxe_services::GcdMemoryType, hob::EFiMemoryTypeInformation},
     uefi_pages_to_size, uefi_size_to_pages, writelncrlf,
@@ -58,16 +58,6 @@ const BLOCK_SIZES: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 fn list_index(layout: &Layout) -> Option<usize> {
     let required_block_size = layout.size().max(layout.align());
     BLOCK_SIZES.iter().position(|&s| s >= required_block_size)
-}
-
-/// Converts the given alignment to a shift value.
-const fn page_shift_from_alignment(alignment: usize) -> Result<usize, EfiError> {
-    let shift = alignment.trailing_zeros() as usize;
-    if !alignment.is_power_of_two() || shift < UEFI_PAGE_SHIFT {
-        return Err(EfiError::InvalidParameter);
-    }
-
-    Ok(shift)
 }
 
 struct BlockListNode {
@@ -893,7 +883,7 @@ mod tests {
     use std::alloc::System;
 
     use patina::{
-        base::{SIZE_64KB, UEFI_PAGE_SIZE},
+        base::{SIZE_64KB, UEFI_PAGE_SHIFT, UEFI_PAGE_SIZE},
         uefi_pages_to_size,
     };
 
