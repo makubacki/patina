@@ -14,6 +14,7 @@ use patina::{base::DEFAULT_CACHE_ATTR, error::EfiError, log_debug_assert};
 use mu_rust_helpers::function;
 use patina::{
     base::{SIZE_4GB, UEFI_PAGE_MASK, UEFI_PAGE_SHIFT, UEFI_PAGE_SIZE, align_up},
+    efi_types::EFI_MAX_MEMORY_TYPE,
     guids::{self, CACHE_ATTRIBUTE_CHANGE_EVENT_GROUP},
     pi::{
         dxe_services::{self, GcdMemoryType, MemorySpaceDescriptor},
@@ -1971,7 +1972,7 @@ pub struct SpinLockedGcd {
     memory: tpl_mutex::TplMutex<GCD>,
     io: tpl_mutex::TplMutex<IoGCD>,
     memory_change_callback: Option<MapChangeCallback>,
-    memory_type_info_table: [EFiMemoryTypeInformation; 17],
+    memory_type_info_table: [EFiMemoryTypeInformation; EFI_MAX_MEMORY_TYPE + 1],
     page_table: tpl_mutex::TplMutex<Option<Box<dyn PatinaPageTable>>>,
     /// Contains the current memory protection policy
     pub(crate) memory_protection_policy: MemoryProtectionPolicy,
@@ -2024,7 +2025,7 @@ impl SpinLockedGcd {
                 EFiMemoryTypeInformation { memory_type: efi::PAL_CODE, number_of_pages: 0 },
                 EFiMemoryTypeInformation { memory_type: efi::PERSISTENT_MEMORY, number_of_pages: 0 },
                 EFiMemoryTypeInformation { memory_type: efi::UNACCEPTED_MEMORY_TYPE, number_of_pages: 0 },
-                EFiMemoryTypeInformation { memory_type: 16 /*EfiMaxMemoryType*/, number_of_pages: 0 },
+                EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
             ],
             page_table: tpl_mutex::TplMutex::new(efi::TPL_HIGH_LEVEL, None, "GcdPageTableLock"),
             memory_protection_policy: MemoryProtectionPolicy::new(),
@@ -2056,7 +2057,7 @@ impl SpinLockedGcd {
     }
 
     /// Returns a reference to the memory type information table.
-    pub const fn memory_type_info_table(&self) -> &[EFiMemoryTypeInformation; 17] {
+    pub const fn memory_type_info_table(&self) -> &[EFiMemoryTypeInformation; EFI_MAX_MEMORY_TYPE + 1] {
         &self.memory_type_info_table
     }
 
