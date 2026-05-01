@@ -23,6 +23,7 @@
 
 # Developer Guides
 
+- [Code First Template](code_first/template.md)
 - [Creating a New Unstable Feature](dev/unstable_feature.md)
 - [Debugging](dev/debugging.md)
   - [Core Reload](dev/debugging/core_reload.md)

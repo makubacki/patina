@@ -19,9 +19,9 @@ particularly for new firmware capabilities and interfaces and hardware technolog
 Patina to implement and test code in parallel with specification drafts. This has the dual benefits of building confidence
 in specification design decisions while also resulting in earlier implementation readiness.
 
-In the case of the UEFI Forum, this process lets changes and development of new features happen in open source, without
-violating the UEFI Forum bylaws which otherwise prevent publication of code for in-draft features/changes as they are
-under UEFI NDA.
+As a UEFI project, Patina will frequently employ the code first process in collaboration with the UEFI Forum. In this
+case , the process lets changes and development of new features happen in open source, without violating the UEFI Forum
+bylaws which otherwise prevent publication of code for in-draft features/changes as they are under UEFI NDA.
 
 Finally, since Patina is a Rust project, code first implementation provides an opportunity to influence specification
 design with insights from Rust language features and design patterns and even idiomatic Rust APIs. This is an important
@@ -36,11 +36,16 @@ Goal: Define a process that allows Patina source code to be developed alongside 
 - Outside the purview of Patina: But can the UEFI Forum maintain public specification source files (markdown/rst) in
   in a publicly accessible repository? That would make it much easier for developers writing draft changes for their
   code first change to copy, paste, and modify existing specification source files for their change.
+  - Even more ideal would be if the UEFI Forum maintained a public repository for specification changes in the form of
+    pull requests that could be linked to code first pull requests in Patina. This would allow for even better tracking
+    of exactly which specification changes are related to which code changes and would make it easier for developers to
+    keep specification changes up to date with code changes and vice versa.
 
 ## Prior Art
 
 The most substantial prior art for this RFC is the [EDK II Code First Process](https://www.tianocore.org/tianocore-wiki.github.io/development/contribution-guides/edk_ii_code_first_process.html).
-The most notable differences from that process is that Patina does not require source code annotation (e.g. code comments).
+The most notable differences from that process is that Patina does not require source code annotation
+(e.g. code comments).
 
 ## Alternatives
 
@@ -58,26 +63,38 @@ The most notable differences from that process is that Patina does not require s
 
 ## The Process
 
+Order of operations are important in the code first process. It is essential to create the "tracking" issue and pull
+request in the Patina repository before submitting an ECR or engaging with the specification body. If the ECR or
+specification body engagement happens first, the process is no longer considered "code first" and potentially under
+an NDA which would prevent code from being developed in an open source repository.
+
 The code first author:
 
-1. Creates a new issue in the Patina repository using the "Code First" form.
-   - Note: Ensure all specifications impacted by the change are selected in the form.
+1. Creates a new "tracking" issue in the Patina repository using the "Code First" GitHub issue form.
+   - Ensure all specifications impacted by the change are selected in the form.
    - The issue must have the `type:code-first` label applied to it.
      - Note: This should happen automatically if the "Code First" form is used to create the issue.
-2. Creates a local "code first" branch.
+   - This issue must remain open until the code first change being tracked is published in the relevant specification(s)
+     and all code changes are merged into the default branch (`main`) of the `OpenDevicePartnership/patina` repository.
+     - Note: This means that PRs to implement the code first change should not close this issue when merged.
+2. Creates a local branch (for the code first change).
+   - Note: This is referred to as the "code first branch" in later steps.
 3. Writes a specification draft change in a markdown file included in a standalone commit on the "code first branch".
+   The file must use the [Code First Template](../../code_first/template.md) and be placed in the `docs/src/code_first`
+   directory of the Patina source tree.
+   - The file should be named: `<GitHub issue number>-<short-description>.md` (e.g. `123-add-feature-x.md`).
    - Note: A file must be present for each specification if more than one specification is impacted by the change.
-   - Note: Base the file content on the template in the Code First GitHub issue submission form.
-4. Authors the code first implementation in the same branch using one or more commits as appropriate.
-5. Pushes the branch for the code first change to their fork (e.g. `username/patina`).
-6. Creates a draft pull request into the default branch (`main`) of the `OpenDevicePartnership/patina` repository.
+4. Authors the code first implementation in the "code first branch" using one or more commits as appropriate.
+5. Pushes the "code first branch" to their fork (e.g. `username/patina`).
+6. Creates a pull request into the default branch (`main`) of the `OpenDevicePartnership/patina` repository.
 7. Applies the `type:code-first` label to the pull request.
-8. Links the GitHub issue created in step 1 to the pull request.
-   - Note: This can be done using a [keyword](https://docs.github.com/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword)
-     in the pull request description (e.g. "Closes \#123") or by [manually linking](https://docs.github.com/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#manually-linking-a-pull-request-to-an-issue-using-the-pull-request-sidebar)
-     the issue to the pull request using the GitHub UI.
-9. Continues to develop the code change in the "code first branch" until it is ready for review.
-10. Takes the PR out of draft after all dependent specification changes have been approved and are publicly published.
+8. Adds a link to the "tracking" issue created in Step 1 to the pull request description.
+   - Example: "Code first tracking issue: \#123"
+9. Adds specification working group members to the pull request. If they are members of the Patina organization on
+   GitHub they must be added as reviewers. If they are not members of the Patina organization, they must be added as
+   assignees or mentioned in the pull request description.
+   - The pull request **cannot** be merged until the working group has approved the code changes.
+10. Continues to develop the code change in the "code first branch" based on feedback.
 11. Goes through the normal PR review process until the PR is approved and merged.
 
 ### GitHub Code First Issue Template Example
@@ -92,7 +109,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Introductory text
+        Introductory text for the GitHub issue
 
   - type: textarea
     id: overview
@@ -118,81 +135,18 @@ body:
     validations:
       required: true
 
-  - type: markdown
-    attributes:
-      value: |
-        **Specification Draft Template**
-
-        For the template below, the title and complete description of the specification changes must be provided in the
-        specification text along with the name and version of the specification the change applies. The `Status` of the
-        specification change always starts in the `Draft` state and is updated based on feedback from the industry
-        standard forums. The contents of the specification text are required to use the
-        [Creative Commons Attribution 4.0 International](https://spdx.org/licenses/CC-BY-4.0.html) license using a
-        `SPDX-License-Identifier` statement.
-
-        - "Required" sections must be completed.
-        - Include a modified template for each specification impacted (if more than one).
-        - Include a copy of the completed template in a markdown file in the code changes.
-          - If more than one template is completed, place each in a separate markdown file.
-
-        ---
-
-        Template text for reference (using the GitHub flavor of markdown):
-
-        ```markdown
-        # Title: [Must be Filled In]
-
-        ## Status: [Status]
-
-        [Status] must be one of the following:
-        - Draft
-        - Submitted to industry standard forum
-        - Accepted by industry standard forum
-        - Accepted by industry standard forum with modifications
-        - Rejected by industry standard forum
-
-        ## Document: [Title and Version]
-
-        Here are some examples of [Title and Version]:
-        - UEFI Specification Version 2.8
-        - ACPI Specification Version 6.3
-        - UEFI Shell Specification Version 2.2
-        - UEFI Platform Initialization Specification Version 1.7
-        - UEFI Platform Initialization Distribution Packaging Specification Version 1.1
-
-        ## License
-
-        SPDX-License-Identifier: CC-BY-4.0
-
-        ## Submitter: [Open Device Partnership](https://www.opendevicepartnership.org)
-
-        ## Summary of the change
-
-        Required Section
-
-        ## Benefits of the change
-
-        Required Section
-
-        ## Impact of the change
-
-        Required Section
-
-        ## Detailed description of the change [normative updates]
-
-        Required Section
-
-        ## Special Instructions
-
-        Optional Section
-        ```
-
   - type: textarea
     id: anything_else
     attributes:
       label: Anything else?
       description: |
         Links? References? Anything that will give us more context about the code first change.
+
+        - Update this section to include links to any pull requests associated with the code first change as they are
+          created.
+
+        - Update this section to include links to the "code first" markdown file for this change after it is merged
+          into the default branch (`main`) of the `OpenDevicePartnership/patina` repository.
 
         Tip: You can attach images or log files by clicking this area to highlight it and then dragging files in.
     validations:
