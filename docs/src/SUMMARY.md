@@ -2,8 +2,7 @@
 
 [Introduction](introduction.md)
 [Patina Background](patina.md)
-[RFC Lifecycle](rfc_lifecycle.md)
-[Code Organization](dev/code_organization.md)
+[Patina in the UEFI Rust Ecosystem](background/patina_in_the_rust_ecosystem.md)
 
 # Background Information
 
@@ -15,6 +14,7 @@
 
 - [Abstractions](dev/principles/abstractions.md)
 - [Architecture Abstraction](dev/principles/architecture-abstraction.md)
+- [Code Organization](dev/code_organization.md)
 - [Code Reuse](dev/principles/reuse.md)
 - [Dependency Management](dev/principles/dependency-management.md)
 - [Error Handling](dev/principles/error-handling.md)
@@ -33,6 +33,7 @@
   - [Memory-Mapped I/O (MMIO)](dev/hardware_access/mmio.md)
 - [Other Resources](dev/other.md)
 - [Process for Unstable Features](dev/unstable.md)
+- [RFC Lifecycle](rfc_lifecycle.md)
 - [RFC Template](rfc/template.md)
 - [Testing](dev/testing.md)
   - [Integration Testing](dev/testing/integration.md)

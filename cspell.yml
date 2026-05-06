@@ -160,6 +160,7 @@ words:
   - reloc
   - rposition
   - ruint
+  - rustification
   - rwlock
   - smbus
   - smcport
