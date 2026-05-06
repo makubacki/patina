@@ -14,17 +14,13 @@
 name: Rust Version Change Detection
 
 on:
-  pull_request:
-    branches: [main]
+  pull_request_target:
+    branches: [rust_ver_check_use_pr_target_trigger]
     types: [opened, synchronize]
     paths:
       - 'rust-toolchain.toml'
 
 jobs:
   check-rust-version:
-      permissions:
-        pull-requests: write
-        contents: read
-
-      uses: OpenDevicePartnership/patina-devops/.github/workflows/RustVersionCheck.yml@v0.3.10
+      uses: makubacki/patina-devops/.github/workflows/RustVersionCheck.yml@test_ver_check_use_pr_target_trigger
       secrets: inherit
