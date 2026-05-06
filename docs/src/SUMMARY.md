@@ -22,6 +22,7 @@
 
 # Developer Guides
 
+- [Creating a New Unstable Feature](dev/unstable_feature.md)
 - [Debugging](dev/debugging.md)
   - [Core Reload](dev/debugging/core_reload.md)
   - [Windbg Debugging Example](dev/debugging/windbg_example.md)
