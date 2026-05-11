@@ -68,6 +68,11 @@ request in the Patina repository before submitting an ECR or engaging with the s
 specification body engagement happens first, the process is no longer considered "code first" and potentially under
 an NDA which would prevent code from being developed in an open source repository.
 
+It is also important to carefully share details in working groups for the same reason. Details should generally be
+limited to information necessary for basic review and Q&A to complete the approval process. All feedback must be
+submitted to the PR/issue in Patina so it can be responded to/acted upon before going back to the working group for
+specification inclusion.
+
 The code first author:
 
 1. Creates a new "tracking" issue in the Patina repository using the "Code First" GitHub issue form.
