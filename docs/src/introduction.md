@@ -122,6 +122,9 @@ start of the different sections mentioned above:
 4. [Contributing to Patina](https://github.com/OpenDevicePartnership/patina/blob/HEAD/CONTRIBUTING.md)
 5. [Developer Guides](dev/documenting.md)
 
+[Patina training videos](training_videos.md) are also available for certain topics. These demonstrate how to work with
+Patina in a hands-on way, where developers share their screen while walking through a specific task.
+
 ## Patina Overview at UEFI Plugfest 2025
 
 <div style="text-align: center; margin: 20px 0;">
