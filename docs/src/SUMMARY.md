@@ -23,6 +23,7 @@
 
 # Developer Guides
 
+- [Code First Process](code_first/code_first_process.md)
 - [Code First Template](code_first/template.md)
 - [Creating a New Unstable Feature](dev/unstable_feature.md)
 - [Debugging](dev/debugging.md)

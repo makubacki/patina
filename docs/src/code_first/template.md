@@ -2,7 +2,7 @@
 
 > Template instruction lines begin with `>`. Delete these lines when filling out the template.
 
-## Status: [Status]
+## Status: \[Status\]
 
 > \[Status\] must be one of the following:
 >
