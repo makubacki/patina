@@ -338,7 +338,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -358,7 +358,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -400,7 +400,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -448,7 +448,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -491,7 +491,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -533,7 +533,7 @@ mod tests {
             let bs_fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -542,7 +542,7 @@ mod tests {
             let bc_fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 2 as _,
-                NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_CODE)),
+                efi::BOOT_SERVICES_CODE,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -575,7 +575,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -609,7 +609,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -633,7 +633,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -698,7 +698,7 @@ mod tests {
                 let reserved_fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );
@@ -708,7 +708,7 @@ mod tests {
                 let unreserved_fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     2 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::LOADER_DATA)),
+                    efi::LOADER_DATA,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                     LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
                 );
@@ -813,7 +813,7 @@ mod tests {
                 let reserved_fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 );

@@ -265,6 +265,8 @@ The config table data comes from a fixed-size `[EFiMemoryTypeInformation]` array
 static. It is populated from the HOB during initialization with the original HOB values. `record_allocation()`
 updates entries when in-bin usage exceeds the original value, creating a monotonically increasing high-water mark.
 
+If bins are not initialized (no Memory Type Information HOB was present), the config table is not installed.
+
 ## Comparison with edk2
 
 Since both the edk2 DXE Core and Patina DXE Core implement PEI memory bin support, this section makes comparison of

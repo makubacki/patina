@@ -194,7 +194,7 @@ pub(crate) static EFI_BOOT_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiA
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_BOOT_SERVICES_DATA_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_DATA)),
+        efi::BOOT_SERVICES_DATA,
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
         HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
@@ -208,7 +208,7 @@ pub static EFI_LOADER_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_LOADER_CODE_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::LOADER_CODE)),
+        efi::LOADER_CODE,
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
         HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
@@ -219,7 +219,7 @@ pub static EFI_LOADER_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_LOADER_DATA_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::LOADER_DATA)),
+        efi::LOADER_DATA,
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
         HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
@@ -230,33 +230,29 @@ pub static EFI_BOOT_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocato
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_BOOT_SERVICES_CODE_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::BOOT_SERVICES_CODE)),
+        efi::BOOT_SERVICES_CODE,
         DEFAULT_PAGE_ALLOCATION_GRANULARITY,
         LOW_TRAFFIC_ALLOC_MIN_EXPANSION,
     ),
     efi::BOOT_SERVICES_CODE,
 );
 
-// This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
-// passed in
 pub static EFI_RUNTIME_SERVICES_CODE_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_RUNTIME_SERVICES_CODE_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_CODE)),
+        efi::RUNTIME_SERVICES_CODE,
         RUNTIME_PAGE_ALLOCATION_GRANULARITY,
         LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
     ),
     efi::RUNTIME_SERVICES_CODE,
 );
 
-// This needs to call MemoryAttributesTable::install on allocation/deallocation, hence having the real callback
-// passed in
 pub static EFI_RUNTIME_SERVICES_DATA_ALLOCATOR: UefiAllocatorWithFsb = UefiAllocator::new(
     SpinLockedFixedSizeBlockAllocator::new(
         &GCD,
         protocol_db::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR_HANDLE,
-        NonNull::from_ref(GCD.memory_type_info(efi::RUNTIME_SERVICES_DATA)),
+        efi::RUNTIME_SERVICES_DATA,
         RUNTIME_PAGE_ALLOCATION_GRANULARITY,
         LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
     ),
@@ -498,20 +494,11 @@ impl AllocatorMap {
                 _ => UEFI_PAGE_SIZE,
             };
 
-            // If this is one of the memory types tracked by the system table, we will use the memory type info struct
-            // from the GCD. Otherwise, we will just leak a new memory type info struct with the given memory type and
-            // have the allocator use it.
-            let memory_type_info = if (memory_type as usize) <= GCD.memory_type_info_table().len() {
-                NonNull::from_ref(GCD.memory_type_info(memory_type))
-            } else {
-                NonNull::from_ref(Box::leak(Box::new(EFiMemoryTypeInformation { memory_type, number_of_pages: 0 })))
-            };
-
             Box::leak(Box::new(UefiAllocator::new(
                 SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     handle,
-                    memory_type_info,
+                    memory_type,
                     granularity,
                     LOW_TRAFFIC_RUNTIME_ALLOC_MIN_EXPANSION,
                 ),
@@ -922,13 +909,11 @@ pub fn terminate_memory_map(map_key: usize) -> Result<(), EfiError> {
 
 pub fn install_memory_type_info_table(system_table: &mut EfiSystemTable) -> Result<(), EfiError> {
     let bin_manager = MEMORY_BIN_MANAGER.lock();
-    let table_ptr = if bin_manager.is_initialized() && !bin_manager.memory_type_information().is_empty() {
-        // Use the bin manager's data if available.
-        bin_manager.memory_type_information().as_ptr() as *mut c_void
-    } else {
-        // Fall back to the static GCD table.
-        NonNull::from(GCD.memory_type_info_table()).cast::<c_void>().as_ptr()
-    };
+    if !bin_manager.is_initialized() || bin_manager.memory_type_information().is_empty() {
+        log::warn!(target: "memory_bin", "No bin manager data available. Memory type information config table not installed.");
+        return Ok(());
+    }
+    let table_ptr = bin_manager.memory_type_information().as_ptr() as *mut c_void;
     drop(bin_manager);
 
     config_tables::core_install_configuration_table(

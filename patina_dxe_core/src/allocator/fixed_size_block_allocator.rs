@@ -30,7 +30,7 @@ use linked_list_allocator::{align_down_size, align_up_size};
 use patina::{
     base::{UEFI_PAGE_SIZE, align_up, page_shift_from_alignment},
     error::EfiError,
-    pi::{dxe_services::GcdMemoryType, hob::EFiMemoryTypeInformation},
+    pi::dxe_services::GcdMemoryType,
     uefi_pages_to_size, uefi_size_to_pages, writelncrlf,
 };
 use r_efi::efi;
@@ -99,9 +99,8 @@ impl Iterator for AllocatorIterator {
 /// the allocator where a new backing linked-list is created.
 ///
 pub struct FixedSizeBlockAllocator {
-    /// The memory type this allocator is managing and number of pages allocated for this memory type. This is used
-    /// to bucketize memory for the EFI_MEMORY_MAP and handle any special cases for memory types.
-    memory_type_info: NonNull<EFiMemoryTypeInformation>,
+    /// The memory type this allocator manages.
+    memory_type: efi::MemoryType,
 
     /// The heads of the linked lists for each fixed-size block. Each index corresponds to a block size in
     /// `BLOCK_SIZES`.
@@ -126,10 +125,10 @@ pub struct FixedSizeBlockAllocator {
 
 impl FixedSizeBlockAllocator {
     /// Creates a new empty FixedSizeBlockAllocator
-    pub const fn new(memory_type_info: NonNull<EFiMemoryTypeInformation>, page_allocation_granularity: usize) -> Self {
+    pub const fn new(memory_type: efi::MemoryType, page_allocation_granularity: usize) -> Self {
         const EMPTY: Option<&'static mut BlockListNode> = None;
         FixedSizeBlockAllocator {
-            memory_type_info,
+            memory_type,
             list_heads: [EMPTY; BLOCK_SIZES.len()],
             allocators: None,
             reserved_range: None,
@@ -146,7 +145,6 @@ impl FixedSizeBlockAllocator {
         self.list_heads = [EMPTY; BLOCK_SIZES.len()];
         self.allocators = None;
         self.reserved_range = None;
-        self.memory_type_info_mut().number_of_pages = 0;
         self.stats = AllocationStatistics::new();
     }
 
@@ -196,9 +194,6 @@ impl FixedSizeBlockAllocator {
         } else {
             self.stats.claimed_pages += uefi_size_to_pages!(new_region.len());
         }
-
-        // if we managed to allocate pages, call into the page change callback to update stats
-        self.update_memory_type_info();
 
         Ok(())
     }
@@ -331,8 +326,6 @@ impl FixedSizeBlockAllocator {
         self.stats.reserved_used = 0;
         self.stats.claimed_pages += uefi_size_to_pages!(size);
 
-        self.update_memory_type_info();
-
         Ok(())
     }
 
@@ -356,9 +349,6 @@ impl FixedSizeBlockAllocator {
         } else {
             self.stats.claimed_pages += uefi_size_to_pages!(allocation.len());
         }
-
-        // if we managed to allocate pages, call into the page change callback to update stats
-        self.update_memory_type_info();
     }
 
     /// Tracks page freeing for record keeping
@@ -368,9 +358,6 @@ impl FixedSizeBlockAllocator {
         } else {
             self.stats.claimed_pages = self.stats.claimed_pages.saturating_sub(pages);
         }
-
-        // call into the page change callback to update stats
-        self.update_memory_type_info();
     }
 
     /// Get the ranges of the memory owned by this allocator
@@ -385,35 +372,15 @@ impl FixedSizeBlockAllocator {
         })
     }
 
-    #[inline(always)]
-    fn memory_type_info(&self) -> &EFiMemoryTypeInformation {
-        // SAFETY: memory_type_info is a pointer to a leaked MemoryTypeInfo structure and there have been no type casts
-        unsafe { self.memory_type_info.as_ref() }
-    }
-
-    #[inline(always)]
-    fn memory_type_info_mut(&mut self) -> &mut EFiMemoryTypeInformation {
-        // SAFETY: memory_type_info is a pointer to a leaked MemoryTypeInfo structure and there have been no type casts
-        unsafe { self.memory_type_info.as_mut() }
-    }
-
     /// Returns the memory type for this allocator
     #[inline(always)]
     pub fn memory_type(&self) -> efi::MemoryType {
-        self.memory_type_info().memory_type
+        self.memory_type
     }
 
     /// Returns a reference to the allocation stats for this allocator.
     pub fn stats(&self) -> &AllocationStatistics {
         &self.stats
-    }
-
-    /// Re-calculates the number of pages allocated for this memory type and updates the memory type info.
-    fn update_memory_type_info(&mut self) {
-        let stats = self.stats();
-        let reserved_free = uefi_size_to_pages!(stats.reserved_size - stats.reserved_used);
-        let page_count = (stats.claimed_pages - reserved_free) as u32;
-        self.memory_type_info_mut().number_of_pages = page_count;
     }
 }
 
@@ -475,7 +442,7 @@ impl SpinLockedFixedSizeBlockAllocator {
     pub const fn new(
         gcd: &'static SpinLockedGcd,
         allocator_handle: efi::Handle,
-        memory_type_info: NonNull<EFiMemoryTypeInformation>,
+        memory_type: efi::MemoryType,
         page_allocation_granularity: usize,
         min_expansion: usize,
     ) -> Self {
@@ -484,7 +451,7 @@ impl SpinLockedFixedSizeBlockAllocator {
             handle: allocator_handle,
             inner: tpl_mutex::TplMutex::new(
                 efi::TPL_HIGH_LEVEL,
-                FixedSizeBlockAllocator::new(memory_type_info, page_allocation_granularity),
+                FixedSizeBlockAllocator::new(memory_type, page_allocation_granularity),
                 "FsbLock",
             ),
             min_expansion,
@@ -902,12 +869,6 @@ mod tests {
         base
     }
 
-    // Test function to create a memory type info structure.
-    fn memory_type_info(memory_type: efi::MemoryType) -> NonNull<EFiMemoryTypeInformation> {
-        let memory_type_info = Box::new(EFiMemoryTypeInformation { memory_type, number_of_pages: 0 });
-        NonNull::new(Box::leak(memory_type_info)).unwrap()
-    }
-
     // this runs each test twice, once with 4KB page allocation granularity and once with 64KB page allocation
     // granularity. This is to ensure that the allocator works correctly with both page allocation granularities.
     fn with_granularity_modulation<F: Fn(usize) + std::panic::RefUnwindSafe>(f: F) {
@@ -931,7 +892,7 @@ mod tests {
 
                 init_gcd(&GCD, 0x400000);
 
-                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::BOOT_SERVICES_DATA), granularity);
+                let mut fsb = FixedSizeBlockAllocator::new(efi::BOOT_SERVICES_DATA, granularity);
 
                 assert_eq!(fsb.get_memory_ranges().count(), 0);
 
@@ -977,7 +938,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     DUMMY_HANDLE,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1021,10 +982,7 @@ mod tests {
     #[test]
     fn test_construct_empty_fixed_size_block_allocator() {
         with_locked_state(|| {
-            let fsb = FixedSizeBlockAllocator::new(
-                memory_type_info(efi::BOOT_SERVICES_DATA),
-                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-            );
+            let fsb = FixedSizeBlockAllocator::new(efi::BOOT_SERVICES_DATA, DEFAULT_PAGE_ALLOCATION_GRANULARITY);
             assert!(fsb.list_heads.iter().all(|x| x.is_none()));
             assert!(fsb.allocators.is_none());
         });
@@ -1041,7 +999,7 @@ mod tests {
                 let base = init_gcd(&GCD, 0x4000000);
 
                 //verify no allocators exist before expand.
-                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::RUNTIME_SERVICES_DATA), granularity);
+                let mut fsb = FixedSizeBlockAllocator::new(efi::RUNTIME_SERVICES_DATA, granularity);
                 assert!(fsb.allocators.is_none());
 
                 let allocation_size = DEFAULT_PAGE_ALLOCATION_GRANULARITY;
@@ -1120,10 +1078,7 @@ mod tests {
             // Allocate some space on the heap with the global allocator (std) to be used by expand().
             init_gcd(&GCD, 0x800000);
 
-            let mut fsb = FixedSizeBlockAllocator::new(
-                memory_type_info(efi::BOOT_SERVICES_DATA),
-                DEFAULT_PAGE_ALLOCATION_GRANULARITY,
-            );
+            let mut fsb = FixedSizeBlockAllocator::new(efi::BOOT_SERVICES_DATA, DEFAULT_PAGE_ALLOCATION_GRANULARITY);
 
             const NUM_ALLOCATIONS: usize = 5;
 
@@ -1166,7 +1121,7 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 let _ = init_gcd(&GCD, 0x400000);
 
-                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::RUNTIME_SERVICES_DATA), granularity);
+                let mut fsb = FixedSizeBlockAllocator::new(efi::RUNTIME_SERVICES_DATA, granularity);
 
                 // Test fallback_alloc with size < size_of::<AllocatorListNode>()
                 let allocation_size = size_of::<AllocatorListNode>() / 2;
@@ -1224,7 +1179,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1252,7 +1207,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1276,7 +1231,7 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 init_gcd(&GCD, 0x400000);
 
-                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::RUNTIME_SERVICES_DATA), granularity);
+                let mut fsb = FixedSizeBlockAllocator::new(efi::RUNTIME_SERVICES_DATA, granularity);
 
                 let layout = Layout::from_size_align(0x8, 0x8).unwrap();
 
@@ -1325,7 +1280,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1366,7 +1321,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1406,7 +1361,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                memory_type_info(efi::BOOT_SERVICES_DATA),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
@@ -1430,7 +1385,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1472,7 +1427,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1509,7 +1464,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1544,7 +1499,7 @@ mod tests {
                 let fsb = SpinLockedFixedSizeBlockAllocator::new(
                     &GCD,
                     1 as _,
-                    memory_type_info(efi::RUNTIME_SERVICES_DATA),
+                    efi::RUNTIME_SERVICES_DATA,
                     granularity,
                     DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 );
@@ -1579,7 +1534,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 0 as _,
-                memory_type_info(efi::BOOT_SERVICES_DATA),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
@@ -1591,7 +1546,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                memory_type_info(efi::BOOT_SERVICES_DATA),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
@@ -1630,7 +1585,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                memory_type_info(efi::BOOT_SERVICES_DATA),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
             );
@@ -1659,7 +1614,7 @@ mod tests {
             let fsb = SpinLockedFixedSizeBlockAllocator::new(
                 &GCD,
                 1 as _,
-                memory_type_info(efi::BOOT_SERVICES_DATA),
+                efi::BOOT_SERVICES_DATA,
                 DEFAULT_PAGE_ALLOCATION_GRANULARITY,
                 HIGH_TRAFFIC_ALLOC_MIN_EXPANSION,
             );
@@ -1860,7 +1815,7 @@ mod tests {
                 // Allocate some space on the heap with the global allocator (std) to be used by expand().
                 let base = init_gcd(&GCD, 0x400000);
 
-                let mut fsb = FixedSizeBlockAllocator::new(memory_type_info(efi::RUNTIME_SERVICES_DATA), granularity);
+                let mut fsb = FixedSizeBlockAllocator::new(efi::RUNTIME_SERVICES_DATA, granularity);
 
                 const NUM_ALLOCATIONS: usize = 3;
 
