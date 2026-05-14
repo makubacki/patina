@@ -225,6 +225,49 @@ impl MemoryBinManager {
         total_size
     }
 
+    /// Calculates a conservative allocation size for a single contiguous bin block.
+    ///
+    /// Returns `None` if there are no bin entries with pages > 0.
+    /// The result includes the raw entry sizes plus worst-case per-entry alignment padding, rounded
+    /// up to the maximum bin granularity.
+    pub(crate) fn contiguous_alloc_size(memory_type_info: &[EFiMemoryTypeInformation]) -> Option<usize> {
+        let mut raw_total: usize = 0;
+        let mut entry_count: usize = 0;
+        let mut max_granularity = DEFAULT_PAGE_ALLOCATION_GRANULARITY;
+
+        for entry in memory_type_info {
+            if entry.memory_type as usize >= EFI_MAX_MEMORY_TYPE {
+                break;
+            }
+            if entry.number_of_pages == 0 {
+                continue;
+            }
+            raw_total += uefi_pages_to_size!(entry.number_of_pages as usize);
+            entry_count += 1;
+            max_granularity = max_granularity.max(Self::granularity_for_type(entry.memory_type));
+        }
+
+        if raw_total == 0 {
+            return None;
+        }
+
+        // Each entry may need up to (granularity - 1) bytes of alignment padding within the block.
+        // Using max_granularity per entry is a safe over-estimate.
+        let padded = raw_total + entry_count * max_granularity;
+        Some(align_up(padded, max_granularity).unwrap_or(padded))
+    }
+
+    /// Returns the maximum allocation granularity across all non-zero bin entries.
+    pub(crate) fn max_granularity(memory_type_info: &[EFiMemoryTypeInformation]) -> usize {
+        memory_type_info
+            .iter()
+            .take_while(|e| (e.memory_type as usize) < EFI_MAX_MEMORY_TYPE)
+            .filter(|e| e.number_of_pages > 0)
+            .map(|e| Self::granularity_for_type(e.memory_type))
+            .max()
+            .unwrap_or(DEFAULT_PAGE_ALLOCATION_GRANULARITY)
+    }
+
     /// Initializes bins from a pre-allocated range (provided via Resource Descriptor HOB from PEI).
     ///
     /// Divides the range `[start, start + length)` into per-type bins based on `memory_type_info`.
@@ -316,69 +359,6 @@ impl MemoryBinManager {
             target: LOG_TARGET,
             "Memory bins initialized from pre-allocated range."
         );
-        true
-    }
-
-    /// Initializes bins by allocating per-type ranges from the GCD.
-    ///
-    /// For each bin type in `memory_type_info`, calls `reserve_fn(memory_type, pages)` which
-    /// should allocate pages via GCD with the appropriate per-type handle and ownership
-    /// preservation. Returns `Some(base_address)` on success, `None` on failure (the bin is
-    /// skipped).
-    ///
-    /// This is used when no pre-allocated range is provided by PEI and bins must be created
-    /// in DXE.
-    pub(crate) fn allocate_bins<R>(&mut self, memory_type_info: &[EFiMemoryTypeInformation], mut reserve_fn: R) -> bool
-    where
-        R: FnMut(efi::MemoryType, usize) -> Option<efi::PhysicalAddress>,
-    {
-        if self.initialized {
-            return false;
-        }
-
-        for (index, entry) in memory_type_info.iter().enumerate() {
-            let mem_type = entry.memory_type;
-            if mem_type as usize >= EFI_MAX_MEMORY_TYPE {
-                break;
-            }
-            if entry.number_of_pages == 0 {
-                continue;
-            }
-
-            let pages = entry.number_of_pages as usize;
-            match reserve_fn(mem_type, pages) {
-                Some(base_address) => {
-                    let entry_size = uefi_pages_to_size!(entry.number_of_pages as usize) as u64;
-                    let stats = &mut self.statistics[mem_type as usize];
-                    stats.base_address = base_address;
-                    stats.maximum_address = base_address + entry_size - 1;
-                    stats.number_of_pages = entry.number_of_pages as u64;
-                    stats.information_index = index;
-
-                    log::info!(
-                        target: LOG_TARGET,
-                        "  Bin[{}] {}: base={:#X} max={:#X} pages={}",
-                        mem_type,
-                        memory_type_name(mem_type),
-                        stats.base_address,
-                        stats.maximum_address,
-                        stats.number_of_pages
-                    );
-                }
-                None => {
-                    log::warn!(
-                        target: LOG_TARGET,
-                        "Failed to reserve bin for {} ({} pages), skipping.",
-                        memory_type_name(mem_type),
-                        pages
-                    );
-                }
-            }
-        }
-
-        self.finalize_information_index(memory_type_info);
-        self.copy_memory_type_info(memory_type_info);
-        self.initialized = true;
         true
     }
 
@@ -947,10 +927,13 @@ mod tests {
         (pages as u64) * UEFI_PAGE_SIZE as u64 + granularity as u64
     }
 
-    /// Uses `calculate_total_bin_size` to compute a range large enough for all bins.
+    /// Initializes a `MemoryBinManager` from the given memory type info at the given base address.
+    ///
+    /// Uses `contiguous_alloc_size` to compute a range large enough for all bins.
     #[coverage(off)]
     fn init_bins(manager: &mut MemoryBinManager, base: u64, info: &[EFiMemoryTypeInformation]) {
-        let range_size = MemoryBinManager::calculate_total_bin_size(info, 0);
+        crate::test_support::init_test_logger();
+        let range_size = MemoryBinManager::contiguous_alloc_size(info).unwrap() as u64;
         assert!(manager.initialize_from_range(base, range_size, info), "init_bins failed");
     }
 
@@ -1016,47 +999,6 @@ mod tests {
         let result = manager.initialize_from_range(0x1000_0000, UEFI_PAGE_SIZE as u64, &info);
         assert!(!result);
         assert!(!manager.is_initialized());
-    }
-
-    #[test]
-    fn test_memory_bin_allocate_bins() {
-        let info = [
-            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: 4 },
-            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: 8 },
-            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
-        ];
-
-        let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        let counter = core::cell::Cell::new(base);
-        let result = manager.allocate_bins(&info, |_mem_type, pages| {
-            let addr = counter.get();
-            counter.set(addr + (pages as u64) * UEFI_PAGE_SIZE as u64);
-            Some(addr)
-        });
-        assert!(result);
-        assert!(manager.is_initialized());
-        assert!(preferred_range(&manager, efi::RUNTIME_SERVICES_CODE).is_some());
-        assert!(preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).is_some());
-    }
-
-    #[test]
-    fn test_memory_bin_allocate_bins_alloc_failure() {
-        let info = [
-            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: 4 },
-            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
-        ];
-
-        let mut manager = MemoryBinManager::new();
-        let result = manager.allocate_bins(
-            &info,
-            |_mem_type, _pages| None, // Allocation failure
-        );
-        // allocate_bins always returns true (skips failed types), but no bins are usable
-        assert!(result);
-        assert!(manager.is_initialized());
-        assert_eq!(preferred_range(&manager, efi::RUNTIME_SERVICES_CODE), None);
-        assert_eq!(manager.active_bins().count(), 0);
     }
 
     #[test]
@@ -1143,8 +1085,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).unwrap();
         let bin_pages = uefi_size_to_pages!((bin_max - bin_base + 1) as usize);
@@ -1171,8 +1112,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).unwrap();
         let bin_size = bin_max - bin_base + 1;
@@ -1209,8 +1149,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).unwrap();
         let bin_size = bin_max - bin_base + 1;
@@ -1246,8 +1185,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).unwrap();
         let bin_size = bin_max - bin_base + 1;
@@ -1288,8 +1226,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         // Entry far away from bin
         let mut buffer = [efi::MemoryDescriptor {
@@ -1313,8 +1250,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_CODE).unwrap();
         let bin_pages = uefi_size_to_pages!((bin_max - bin_base + 1) as usize);
@@ -1344,7 +1280,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(0x2000_0000));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         // RT Code (special+runtime), RT Data (special+runtime), ACPI NVS (special) = 3 (special) memory bins
         assert_eq!(manager.max_additional_descriptors(), 3 * 2);
@@ -1513,12 +1449,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let counter = core::cell::Cell::new(0x3000_0000u64);
-        manager.allocate_bins(&info, |_mem_type, pages| {
-            let addr = counter.get();
-            counter.set(addr + (pages as u64) * UEFI_PAGE_SIZE as u64);
-            Some(addr)
-        });
+        init_bins(&mut manager, 0x3000_0000, &info);
 
         let bins: Vec<_> = manager.active_bins().collect();
         // RTCode (4 pages) and ACPI NVS (2 pages). RTData has 0 pages so excluded.
@@ -1535,7 +1466,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(0x1000_0000));
+        init_bins(&mut manager, 0x1000_0000, &info);
 
         // BSData is not a special type, so record_allocation should be a no-op
         manager.record_allocation(efi::BOOT_SERVICES_DATA, 2);
@@ -1550,7 +1481,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(0x1000_0000));
+        init_bins(&mut manager, 0x1000_0000, &info);
 
         // Address outside the bin range is counted so BDS can see overflow.
         manager.record_allocation(efi::RUNTIME_SERVICES_DATA, 2);
@@ -1593,7 +1524,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(0x1000_0000));
+        init_bins(&mut manager, 0x1000_0000, &info);
 
         let mti = manager.memory_type_information();
         assert_eq!(mti.len(), 3);
@@ -1604,29 +1535,6 @@ mod tests {
     }
 
     #[test]
-    fn test_allocate_bins_partial_failure() {
-        let info = [
-            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: 4 },
-            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: 8 },
-            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
-        ];
-
-        let mut manager = MemoryBinManager::new();
-        // Only succeed for RTData, fail for RTCode
-        manager.allocate_bins(
-            &info,
-            |mem_type, _pages| {
-                if mem_type == efi::RUNTIME_SERVICES_DATA { Some(0x2000_0000) } else { None }
-            },
-        );
-
-        assert!(manager.is_initialized());
-        assert_eq!(preferred_range(&manager, efi::RUNTIME_SERVICES_CODE), None);
-        assert!(preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).is_some());
-        assert_eq!(manager.active_bins().count(), 1);
-    }
-
-    #[test]
     fn test_apply_descriptors_skips_non_conventional() {
         let info = [
             EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: 4 },
@@ -1634,8 +1542,7 @@ mod tests {
         ];
 
         let mut manager = MemoryBinManager::new();
-        let base = 0x2000_0000u64;
-        manager.allocate_bins(&info, |_mem_type, _pages| Some(base));
+        init_bins(&mut manager, 0x2000_0000, &info);
 
         let (bin_base, bin_max) = preferred_range(&manager, efi::RUNTIME_SERVICES_DATA).unwrap();
         let bin_pages = uefi_size_to_pages!((bin_max - bin_base + 1) as usize);
@@ -1691,6 +1598,73 @@ mod tests {
         assert_eq!(align_pages_to_granularity(15, SIZE_64KB), 16);
         assert_eq!(align_pages_to_granularity(16, SIZE_64KB), 16);
         assert_eq!(align_pages_to_granularity(17, SIZE_64KB), 32);
+    }
+
+    #[test]
+    fn test_contiguous_alloc_size_single_entry() {
+        let rt_data_pages = 10;
+
+        let info = [
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: rt_data_pages },
+            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
+        ];
+        let size = MemoryBinManager::contiguous_alloc_size(&info).unwrap();
+        let raw = rt_data_pages as usize * UEFI_PAGE_SIZE;
+        let granularity = MemoryBinManager::granularity_for_type(efi::RUNTIME_SERVICES_DATA);
+        // Must be at least raw + one granularity unit of padding, rounded up to granularity.
+        assert!(size >= raw + granularity);
+        assert_eq!(size % granularity, 0);
+    }
+
+    #[test]
+    fn test_contiguous_alloc_size_multiple_entries() {
+        let rt_code_pages = 4;
+        let rt_data_pages = 8;
+        let acpi_reclaim_pages = 2;
+        let total_pages: usize = (rt_code_pages + rt_data_pages + acpi_reclaim_pages) as usize;
+
+        let info = [
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: rt_code_pages },
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: rt_data_pages },
+            EFiMemoryTypeInformation { memory_type: efi::ACPI_RECLAIM_MEMORY, number_of_pages: acpi_reclaim_pages },
+            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
+        ];
+        let size = MemoryBinManager::contiguous_alloc_size(&info).unwrap();
+
+        let raw = total_pages * UEFI_PAGE_SIZE;
+        assert!(size >= raw, "size {:#X} must be >= raw {:#X}", size, raw);
+    }
+
+    #[test]
+    fn test_contiguous_alloc_size_empty() {
+        // Sentinel only, no pages.
+        let info = [EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 }];
+        assert_eq!(MemoryBinManager::contiguous_alloc_size(&info), None);
+    }
+
+    #[test]
+    fn test_contiguous_alloc_size_all_zero_pages() {
+        let info = [
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: 0 },
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: 0 },
+            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
+        ];
+        assert_eq!(MemoryBinManager::contiguous_alloc_size(&info), None);
+    }
+
+    #[test]
+    fn test_contiguous_alloc_size_skips_zero_page_entries() {
+        let rt_data_pages = 4;
+
+        let info = [
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_CODE, number_of_pages: 0 },
+            EFiMemoryTypeInformation { memory_type: efi::RUNTIME_SERVICES_DATA, number_of_pages: rt_data_pages },
+            EFiMemoryTypeInformation { memory_type: EFI_MAX_MEMORY_TYPE as u32, number_of_pages: 0 },
+        ];
+        let size = MemoryBinManager::contiguous_alloc_size(&info).unwrap();
+        // Only 1 entry with pages > 0, so padding = 1 * max_granularity.
+        let raw = rt_data_pages as usize * UEFI_PAGE_SIZE;
+        assert!(size >= raw);
     }
 
     /// Helper that builds a single-bin manager (RUNTIME_SERVICES_DATA) and returns the

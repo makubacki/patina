@@ -45,9 +45,10 @@ use r_efi::{efi, system::TPL_HIGH_LEVEL};
 pub use uefi_allocator::UefiAllocator;
 
 use patina::{
-    base::{SIZE_4KB, UEFI_PAGE_MASK, UEFI_PAGE_SIZE, align_up},
+    base::{SIZE_4KB, UEFI_PAGE_MASK, UEFI_PAGE_SIZE},
+    efi_types::EFI_MAX_MEMORY_TYPE,
     error::EfiError,
-    guids, uefi_pages_to_size, uefi_size_to_pages, writelncrlf,
+    guids, uefi_size_to_pages, writelncrlf,
 };
 
 // Type alias for a UefiAllocator with a SpinLockedFixedSizeBlockAllocator
@@ -1183,12 +1184,13 @@ pub fn init_memory_support(hob_list: &HobList) {
 
 /// Initializes memory bins from HOB data.
 ///
-/// Path A (PEI bins): If a Resource Descriptor HOB with the `MemoryTypeInformation` owner GUID
-/// is found, bins are initialized from that pre-allocated range, then free pages within those
-/// ranges are claimed for the corresponding per-type allocators via GCD ownership.
+/// Bins are initialized from a contiguous address range and then claimed per-type via
+/// `reserve_bin_ranges`. The range is resolved in priority order:
 ///
-/// Path B (DXE bins): If no PEI range exists, each bin type is allocated directly from the GCD
-/// with the appropriate per-type handle and ownership preservation.
+/// 1. PEI-provided bins: A Resource Descriptor HOB with the `MemoryTypeInformation` owner GUID
+///    provides a pre-allocated range from PEI.
+/// 2. DXE-allocated bins: If no PEI range exists, a single contiguous block is allocated from the
+///    GCD, freed back, and used as the range.
 ///
 /// Note: A local `MemoryBinManager` is used during initialization to avoid holding the global lock
 /// during GCD allocations (which would cause re-entrant lock panics since allocation recording also
@@ -1199,54 +1201,75 @@ fn initialize_memory_bins(hob_list: &HobList, memory_type_info: &[EFiMemoryTypeI
         return;
     }
 
+    // Resolve the overall bin block to either PEI-provided or DXE-allocated.
+    let bin_range =
+        find_pei_bin_range(hob_list, memory_type_info).or_else(|| allocate_contiguous_bin_range(memory_type_info));
+
+    let Some((start, length)) = bin_range else {
+        log::warn!(target: "memory_bin", "No bin range available. Memory bins will not be initialized.");
+        return;
+    };
+
     let mut local_manager = MemoryBinManager::new();
-
-    // Path A: Use a pre-allocated bin region from PEI (Resource Descriptor HOB with owner GUID).
-    if let Some((start, length)) = crate::memory_bin::find_memory_type_info_resource_hob(hob_list, memory_type_info) {
-        log::info!(target: "memory_bin", "Found PEI bin region at {:#X}, length {:#X}.", start, length);
-        if local_manager.initialize_from_range(start, length, memory_type_info) {
-            *MEMORY_BIN_MANAGER.lock() = local_manager;
-            // Claim free GCD pages within each bin range for the bin type's allocator.
-            reserve_bin_ranges();
-            return;
-        }
+    if !local_manager.initialize_from_range(start, length, memory_type_info) {
+        log::warn!(target: "memory_bin", "Failed to initialize bins from range at {:#X}, length {:#X}.", start, length);
+        return;
     }
 
-    // Path B: PEI bins not found so allocate each bin type directly via GCD with per-type allocator ownership.
-    log::info!(target: "memory_bin", "No PEI bin region found. Allocating bins per-type from GCD.");
-    local_manager.allocate_bins(memory_type_info, |memory_type, pages| {
-        let handle = AllocatorMap::handle_for_memory_type(memory_type).ok()?;
-        // Align the allocation size up to the type's granularity so the GCD block is properly aligned.
-        let granularity = MemoryBinManager::granularity_for_type(memory_type);
-        let raw_size = uefi_pages_to_size!(pages);
-        let size = align_up(raw_size, granularity).unwrap_or(raw_size);
-        let align_shift = granularity.trailing_zeros() as usize;
-        let addr = GCD
-            .allocate_memory_space(
-                DEFAULT_ALLOCATION_STRATEGY,
-                GcdMemoryType::SystemMemory,
-                align_shift,
-                size,
-                handle,
-                None,
-            )
-            .ok()?;
-        if let Err(err) = GCD.free_memory_space_preserving_ownership(addr, size) {
-            log::error!(target: "memory_bin", "Failed to preserve ownership at {:#X}: {:?}", addr, err);
-        }
-        Some(addr as efi::PhysicalAddress)
-    });
     *MEMORY_BIN_MANAGER.lock() = local_manager;
+    reserve_bin_ranges();
+}
 
-    // Set reserved ranges so allocations prefer bin ranges and frees preserve ownership.
-    let bin_manager = MEMORY_BIN_MANAGER.lock();
-    for (memory_type, base, max, _pages) in bin_manager.active_bins() {
-        if let Ok(handle) = AllocatorMap::handle_for_memory_type(memory_type)
-            && let Ok(allocator) = ALLOCATORS.lock().get_or_create_allocator(memory_type, handle)
-        {
-            let _ = allocator.set_reserved_range(base..(max + 1));
-        }
-    }
+/// Attempts to find a PEI-provided bin range from a Resource Descriptor HOB.
+#[coverage(off)]
+fn find_pei_bin_range(
+    hob_list: &HobList,
+    memory_type_info: &[EFiMemoryTypeInformation],
+) -> Option<(efi::PhysicalAddress, u64)> {
+    let (start, length) = crate::memory_bin::find_memory_type_info_resource_hob(hob_list, memory_type_info)?;
+    log::info!(target: "memory_bin", "Found PEI bin region at {:#X}, length {:#X}.", start, length);
+    Some((start, length))
+}
+
+/// Allocates a single contiguous block from the GCD for all bin types.
+///
+/// The block is freed back to the GCD immediately so that it can be reclaimed for per-type ranges.
+#[coverage(off)]
+fn allocate_contiguous_bin_range(memory_type_info: &[EFiMemoryTypeInformation]) -> Option<(efi::PhysicalAddress, u64)> {
+    log::info!(target: "memory_bin", "No PEI bin region found. Allocating a contiguous bin range from the GCD.");
+
+    let alloc_size = MemoryBinManager::contiguous_alloc_size(memory_type_info)?;
+    let max_granularity = MemoryBinManager::max_granularity(memory_type_info);
+    let align_shift = max_granularity.trailing_zeros() as usize;
+
+    let temp_handle = memory_type_info
+        .iter()
+        .find(|e| e.number_of_pages > 0 && (e.memory_type as usize) < EFI_MAX_MEMORY_TYPE)
+        .and_then(|e| AllocatorMap::handle_for_memory_type(e.memory_type).ok())?;
+
+    let addr = GCD
+        .allocate_memory_space(
+            DEFAULT_ALLOCATION_STRATEGY,
+            GcdMemoryType::SystemMemory,
+            align_shift,
+            alloc_size,
+            temp_handle,
+            None,
+        )
+        .inspect_err(|err| {
+            log::warn!(
+                target: "memory_bin",
+                "Failed to allocate contiguous bin range ({:#X} bytes) from GCD: {:?}",
+                alloc_size,
+                err
+            );
+        })
+        .ok()?;
+
+    // Free the block so reserve_bin_ranges can re-claim per-type ownership.
+    let _ = GCD.free_memory_space(addr, alloc_size);
+
+    Some((addr as efi::PhysicalAddress, alloc_size as u64))
 }
 
 /// Seeds bin statistics from PEI Memory Allocation HOBs marked with `MEMORY_TYPE_INFO_HOB_GUID`.

@@ -148,9 +148,13 @@ Memory Allocation HOBs without the `MEMORY_TYPE_INFO_HOB_GUID` name are processe
 Bin initialization runs once during `init_memory_support()`, after the GCD and pre-DXE HOB allocations have been fully
 processed.
 
-There are two primary paths taken depending on whether PEI memory bins are active or not.
+The initialization flow resolves a contiguous bin range and then subdivides it into per-type bins. The range is
+resolved in priority order:
 
-### Path A: PEI Provided Bin Range
+1. PEI bins (Path A): Use a pre-allocated range from an incoming Resource Descriptor HOB.
+2. DXE bins (Path B): Designate a single contiguous block from the GCD.
+
+### Path A: PEI provided bin range
 
 If PEI allocated memory bins (indicated by a Resource Descriptor HOB with an owner GUID of`MEMORY_TYPE_INFO_HOB_GUID`),
 Patina uses that pre-allocated range directly:
@@ -169,19 +173,17 @@ After bin ranges are established, Patina scans Memory Allocation HOBs whose `Nam
 `MEMORY_TYPE_INFO_HOB_GUID`. These are allocations PEI's bin-aware allocator made. For each one that falls within
 a bin range, the bin's `current_number_of_pages` is incremented to seed the statistics with pre-DXE usage.
 
-### Path B: DXE-Allocated Bins
+### Path B: DXE-allocated bins
 
-If no Resource Descriptor HOB is found, Patina allocates each bin individually:
+If no Resource Descriptor HOB is found, Patina allocates a single contiguous block from the GCD that is large enough
+to hold all bins plus worst-case alignment padding:
 
-1. For each memory type entry in the HOB, allocate a block of pages from the GCD using the type's per-type
-   allocator handle, with alignment matching the type's granularity.
-2. `free_memory_space_preserving_ownership()` is used to free the block. The pages are marked free but retain the
-   allocator's handle as the GCD owner.
-3. The bin range is recorded in the `MemoryBinManager`.
-
-The allocate-then-free pattern reserves address ranges in the GCD without permanently consuming the pages.
-GCD ownership prevents other allocators from claiming these pages during their own expansion. The per-type
-allocator's bin-preference logic directs allocations into these ranges.
+1. A conservative total size is calculated which is the sum of all entry sizes plus one unit of `max_granularity` per
+   entry for alignment padding, rounded up to `max_granularity`.
+2. The block is allocated with `GCD.allocate_memory_space()` with alignment matching the maximum granularity
+   across all bin types (`MemoryBinManager::max_granularity()`).
+3. The block is immediately freed back to the GCD so it can be re-claimed.
+4. The block is then subdivided into per-type bins using the same logic as Path A.
 
 This path provides less stability than Path A because the bin addresses depend on the GCD allocator's state at
 the time of initialization, which has a relatively greater chance to vary between boots.
