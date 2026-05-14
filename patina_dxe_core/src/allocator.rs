@@ -897,7 +897,53 @@ extern "efiapi" fn get_memory_map(
 
     log::debug!(target: "efi_memory_map", "EFI_MEMORY_MAP: \n{:?}", MemoryDescriptorSlice(&buffer[..actual_count]));
 
+    if log::log_enabled!(target: "memory_bin", log::Level::Debug) {
+        dump_memory_bin_stats();
+    }
+
+    if log::log_enabled!(target: "allocations", log::Level::Trace) {
+        dump_allocator_details();
+    }
+
     efi::Status::SUCCESS
+}
+
+/// Dumps bin manager peak tracking data at debug level.
+#[coverage(off)]
+fn dump_memory_bin_stats() {
+    let bin_manager = MEMORY_BIN_MANAGER.lock();
+    if bin_manager.is_initialized() {
+        log::debug!(target: "memory_bin", "Bin manager table (peak tracking for BDS):");
+        for entry in bin_manager.memory_type_information() {
+            log::debug!(
+                target: "memory_bin",
+                "  {} pages={}",
+                crate::memory_bin::memory_type_name(entry.memory_type),
+                entry.number_of_pages
+            );
+        }
+    }
+}
+
+/// Dumps per-allocator page counts at trace level.
+#[coverage(off)]
+fn dump_allocator_details() {
+    log::trace!(target: "allocations", "Allocator page counts:");
+    for (alloc, _) in STATIC_ALLOCATORS.iter() {
+        let stats = alloc.stats();
+        let reserved_free = uefi_size_to_pages!(stats.reserved_size - stats.reserved_used);
+        let net_pages = stats.claimed_pages.saturating_sub(reserved_free);
+        if net_pages > 0 {
+            log::trace!(
+                target: "allocations",
+                "  {} net_pages={} (claimed={} reserved_free={})",
+                crate::memory_bin::memory_type_name(alloc.memory_type()),
+                net_pages,
+                stats.claimed_pages,
+                reserved_free
+            );
+        }
+    }
 }
 
 pub fn terminate_memory_map(map_key: usize) -> Result<(), EfiError> {

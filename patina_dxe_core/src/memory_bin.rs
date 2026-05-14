@@ -373,6 +373,7 @@ impl MemoryBinManager {
             }
             self.statistics[mem_type].current_number_of_pages = 0;
         }
+        log::trace!(target: LOG_TARGET, "Bin stats: finalized information indices, reset current_number_of_pages to 0 for all types");
     }
 
     /// Copies memory type information entries into the fixed-size array.
@@ -380,6 +381,23 @@ impl MemoryBinManager {
         let count = memory_type_info.len().min(MAX_MEMORY_TYPE_INFO_ENTRIES);
         self.memory_type_information[..count].copy_from_slice(&memory_type_info[..count]);
         self.memory_type_information_count = count;
+
+        if log::log_enabled!(target: LOG_TARGET, log::Level::Trace) {
+            log::trace!(
+                target: LOG_TARGET,
+                "Bin table: initialized with {} entries from HOB",
+                count
+            );
+
+            for entry in &self.memory_type_information[..count] {
+                log::trace!(
+                    target: LOG_TARGET,
+                    "  Bin table: {} pages={}",
+                    memory_type_name(entry.memory_type),
+                    entry.number_of_pages
+                );
+            }
+        }
     }
 
     /// Seeds bin statistics from a PEI memory allocation HOB.
@@ -450,14 +468,17 @@ impl MemoryBinManager {
         }
 
         let aligned_pages = align_pages_to_granularity(pages, Self::granularity_for_type(memory_type));
+        let prev = self.statistics[type_idx].current_number_of_pages;
         self.statistics[type_idx].current_number_of_pages += aligned_pages;
 
         log::trace!(
             target: LOG_TARGET,
-            "Alloc: {} +{} pages. current={}",
+            "Bin stats: {} current_pages {} -> {} (alloc +{} aligned to {})",
             memory_type_name(memory_type),
+            prev,
+            self.statistics[type_idx].current_number_of_pages,
             pages,
-            self.statistics[type_idx].current_number_of_pages
+            aligned_pages
         );
 
         // Update peak tracking: if current exceeds previous peak, update for BDS
@@ -466,13 +487,15 @@ impl MemoryBinManager {
             && self.statistics[type_idx].current_number_of_pages
                 > self.memory_type_information[info_idx].number_of_pages as u64
         {
+            let prev_peak = self.memory_type_information[info_idx].number_of_pages;
             self.memory_type_information[info_idx].number_of_pages =
                 self.statistics[type_idx].current_number_of_pages as u32;
-            log::debug!(
+            log::trace!(
                 target: LOG_TARGET,
-                "Peak update: {} new peak={} pages",
+                "Bin table: {} pages {} -> {} (peak update)",
                 memory_type_name(memory_type),
-                self.statistics[type_idx].current_number_of_pages
+                prev_peak,
+                self.memory_type_information[info_idx].number_of_pages
             );
         }
     }
@@ -491,15 +514,18 @@ impl MemoryBinManager {
         }
 
         let aligned_pages = align_pages_to_granularity(pages, Self::granularity_for_type(memory_type));
+        let prev = self.statistics[type_idx].current_number_of_pages;
         self.statistics[type_idx].current_number_of_pages =
             self.statistics[type_idx].current_number_of_pages.saturating_sub(aligned_pages);
 
         log::trace!(
             target: LOG_TARGET,
-            "Free: {} -{} pages. current={}",
+            "Bin stats: {} current_pages {} -> {} (free -{} aligned to {})",
             memory_type_name(memory_type),
+            prev,
+            self.statistics[type_idx].current_number_of_pages,
             pages,
-            self.statistics[type_idx].current_number_of_pages
+            aligned_pages
         );
     }
 

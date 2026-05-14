@@ -303,5 +303,7 @@ All memory bin log messages use the `memory_bin` log target. These are some key 
 | `debug` | PEI seed per allocation HOBs           | Statistics seeding                   |
 | `debug` | GetMemoryMap() bin processing          | Each bin processed in GetMemoryMap() |
 | `trace` | Individual alloc/free recording        | Every page allocation/free           |
+| `trace` | Bin stats old -> new transitions       | Every record_allocation/record_free  |
+| `trace` | Bin table peak updates                 | When peak exceeds previous value     |
 
 Filter with the `memory_bin` log target to isolate bin-related output.
