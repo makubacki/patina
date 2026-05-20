@@ -791,12 +791,29 @@ pub fn core_free_pages(memory: efi::PhysicalAddress, pages: usize) -> Result<(),
 }
 
 extern "efiapi" fn copy_mem(destination: *mut c_void, source: *mut c_void, length: usize) {
+    if length == 0 {
+        return;
+    }
+    debug_assert!(!destination.is_null(), "copy_mem called with null destination and non-zero length");
+    debug_assert!(!source.is_null(), "copy_mem called with null source and non-zero length");
+    if destination.is_null() || source.is_null() {
+        return;
+    }
     // SAFETY: caller must ensure that the source and destination are valid for length bytes.
+    //         destination and source have been null-checked above.
     unsafe { core::ptr::copy(source as *mut u8, destination as *mut u8, length) }
 }
 
 extern "efiapi" fn set_mem(buffer: *mut c_void, size: usize, value: u8) {
+    if size == 0 {
+        return;
+    }
+    debug_assert!(!buffer.is_null(), "set_mem called with null buffer and non-zero size");
+    if buffer.is_null() {
+        return;
+    }
     // SAFETY: caller must ensure that the buffer is valid for size bytes.
+    //         buffer has been null-checked above.
     unsafe {
         let dst_buffer = from_raw_parts_mut(buffer as *mut u8, size);
         dst_buffer.fill(value);
@@ -1835,10 +1852,55 @@ mod tests {
     }
 
     #[test]
+    fn copy_mem_zero_length_is_noop_even_with_null() {
+        // A zero-length copy is a valid no-op
+        copy_mem(core::ptr::null_mut(), core::ptr::null_mut(), 0);
+    }
+
+    #[test]
     fn set_mem_should_set_mem() {
         let mut dest = vec![0xa5u8; 0x10];
         set_mem(dest.as_mut_ptr() as *mut c_void, 0x10, 0x00);
         assert_eq!(dest, vec![0x00u8; 0x10]);
+    }
+
+    #[test]
+    fn set_mem_fills_bytes() {
+        let mut buf: [u8; 8] = [0; 8];
+        set_mem(buf.as_mut_ptr() as *mut c_void, buf.len(), 0xAB);
+        assert_eq!(buf, [0xAB; 8]);
+    }
+
+    #[test]
+    fn set_mem_zero_size_is_noop_even_with_null() {
+        // A zero-size fill is a valid no-op
+        set_mem(core::ptr::null_mut(), 0, 0xFF);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn copy_mem_null_destination_returns_without_writing() {
+        let src: [u8; 4] = [1, 2, 3, 4];
+        // When given a null destination with a non-zero length, the function either
+        // asserts (if debug_assertions are enabled) or returns without dereferencing either pointer.
+        copy_mem(core::ptr::null_mut(), src.as_ptr() as *mut c_void, src.len());
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn copy_mem_null_source_returns_without_writing() {
+        let mut dst: [u8; 4] = [0xAA; 4];
+        // When given a null source with a non-zero length, the function either
+        // asserts (if debug_assertions are enabled) or returns without dereferencing either pointer.
+        copy_mem(dst.as_mut_ptr() as *mut c_void, core::ptr::null_mut(), dst.len());
+        assert_eq!(dst, [0xAA; 4]);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn set_mem_null_buffer_returns_without_writing() {
+        // A null buffer with a non-zero size returns without dereferencing.
+        set_mem(core::ptr::null_mut(), 4, 0xFF);
     }
 
     #[test]

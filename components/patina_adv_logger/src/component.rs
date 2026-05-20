@@ -61,12 +61,17 @@ where
         buffer: *const u8,
         num_bytes: usize,
     ) -> efi::Status {
-        // SAFETY: We have no choice but to trust the caller on the buffer size. convert
-        //         to a reference for internal safety.
+        if this.is_null() || buffer.is_null() {
+            return efi::Status::INVALID_PARAMETER;
+        }
+
+        // SAFETY: `buffer` is null-checked above. We have no choice but to trust the caller
+        //         on the buffer size. Convert to a slice for internal use.
         let data = unsafe { core::slice::from_raw_parts(buffer, num_bytes) };
         let error_level = error_level as u32;
 
-        // SAFETY: We must trust the C code was a responsible steward of this buffer.
+        // SAFETY: `this` is null-checked above. The protocol struct is installed by Patina with
+        //         `Box::leak`, so its alignment and validity are guaranteed.
         let internal = unsafe { &*(this as *const AdvancedLoggerProtocolInternal<S>) };
 
         internal.adv_logger.log_write(error_level, None, data);
