@@ -284,7 +284,9 @@ impl<'a> EfiHardwareInterruptV2Protocol<'a> {
             hw_interrupt2_protocol.hw_interrupt_handler.aarch64_int.lock().get_interrupt_source_state(interrupt_source);
         match enable {
             Ok(enable) => {
-                unsafe { *state = enable }
+                // SAFETY: `state` is checked to be non-null above. Note that caller-supplied pointer
+                //         alignment is not guaranteed.
+                unsafe { state.write_unaligned(enable) }
                 efi::Status::SUCCESS
             }
             Err(err) => err.into(),
@@ -314,7 +316,7 @@ impl<'a> EfiHardwareInterruptV2Protocol<'a> {
         interrupt_source: u64,
         trigger_type: *mut HardwareInterrupt2TriggerType,
     ) -> efi::Status {
-        if this.is_null() {
+        if this.is_null() || trigger_type.is_null() {
             return efi::Status::INVALID_PARAMETER;
         }
 
@@ -323,7 +325,9 @@ impl<'a> EfiHardwareInterruptV2Protocol<'a> {
         let level = hw_interrupt2_protocol.hw_interrupt_handler.aarch64_int.lock().get_trigger_type(interrupt_source);
         match level {
             Ok(level) => {
-                unsafe { *trigger_type = level.into() }
+                // SAFETY: `trigger_type` is a caller-supplied out-pointer
+                //         its alignment is not guaranteed.
+                unsafe { trigger_type.write_unaligned(level.into()) }
                 efi::Status::SUCCESS
             }
             Err(err) => err.into(),

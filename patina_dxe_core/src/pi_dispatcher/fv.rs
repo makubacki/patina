@@ -535,7 +535,7 @@ impl<P: PlatformInfo> FvProtocolData<P> {
         };
 
         // SAFETY: caller must provide valid pointers for num_bytes and buffer. They are null-checked above.
-        let bytes_to_read = unsafe { *num_bytes };
+        let bytes_to_read = unsafe { num_bytes.read_unaligned() };
 
         let data = match Self::instance().fvb_read(protocol, lba, offset, bytes_to_read) {
             Err(err) => return err.into(),
