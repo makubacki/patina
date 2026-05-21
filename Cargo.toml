@@ -2,6 +2,8 @@
 resolver = "3"
 members = ["components/*", "core/*", "sdk/*", "patina_dxe_core"]
 
+# Test change
+
 [workspace.package]
 version = "21.0.4"
 license = "Apache-2.0"
