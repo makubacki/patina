@@ -22,11 +22,13 @@ on:
       - main
       - major
       - feature/**/*
+      - add_mdbook_profile_test_new_workflow
   pull_request:
     branches:
       - main
       - major
       - feature/**/*
+      - add_mdbook_profile_test_new_workflow
 
 # Do not allow more than one instance of this workflow to run at the same
 # time for the same PR ref (branch). Prefer head_ref but fall back to ref
@@ -47,9 +49,5 @@ jobs:
     secrets: inherit
   mdbook_docs_test:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@v0.3.10
-    with:
-      mdbook-path: "docs"
-      build-cmd: cargo make build-mdbook-deps
-      deps-dir: "target/mdbook/deps/"
+    uses: makubacki/patina-devops/.github/workflows/MdbookWorkflow.yml@update_mdbookworkflow_yml
     secrets: inherit
