@@ -50,5 +50,6 @@ jobs:
     uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@v0.3.10
     with:
       mdbook-path: "docs"
-      build-cmd: cargo make build-lib
+      build-cmd: cargo make build-mdbook-deps
+      deps-dir: "target/mdbook/deps/"
     secrets: inherit
