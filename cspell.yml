@@ -159,6 +159,7 @@ words:
   - regsvr
   - relia
   - reloc
+  - rlibs
   - rposition
   - ruint
   - rustification
