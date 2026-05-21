@@ -8,7 +8,7 @@ title = "Developing UEFI with Rust"
 additional-js = ["cdn-assets.js", "mermaid.min.js", "mermaid-init.js"]
 additional-css = ["./mdbook-admonish.css"]
 
-[output.html.playpen]
+[output.html.playground]
 editable = true
 editor = "ace"
 line-numbers = true
