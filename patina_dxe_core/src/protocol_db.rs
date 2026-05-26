@@ -214,7 +214,7 @@ impl ProtocolDb {
 
     fn registered_protocols(&self) -> Vec<efi::Guid> {
         let protocols: BTreeSet<efi::Guid> =
-            self.handles.iter().flat_map(|(_, handle)| handle.keys().map(|&OrdGuid(guid)| guid)).collect();
+            self.handles.values().flat_map(|handle| handle.keys().map(|&OrdGuid(guid)| guid)).collect();
         protocols.into_iter().collect()
     }
 

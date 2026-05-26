@@ -969,7 +969,7 @@ mod tests {
                 let ranges: Vec<_> = fsb.get_memory_ranges().collect();
                 assert_eq!(ranges.len(), 1);
 
-                let expected_start = allocated_address as usize + size_of::<AllocatorListNode>();
+                let expected_start = allocated_address + size_of::<AllocatorListNode>();
                 let expected_end = expected_start + allocation_size - size_of::<AllocatorListNode>();
                 assert_eq!(ranges[0], expected_start..expected_end);
             });

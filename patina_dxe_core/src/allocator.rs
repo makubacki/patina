@@ -708,10 +708,8 @@ pub fn core_allocate_pages(
     // If the memory type is runtime services code or data, we need to install the memory attributes table to reflect
     // the update. The MAT logic will decide if it is a proper time to install the MAT or not.
     match memory_type {
-        efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA => {
-            if res.is_ok() {
-                MemoryAttributesTable::install();
-            }
+        efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA if res.is_ok() => {
+            MemoryAttributesTable::install();
         }
         _ => {}
     }
@@ -777,10 +775,8 @@ pub fn core_free_pages(memory: efi::PhysicalAddress, pages: usize) -> Result<(),
     // If the memory type is runtime services code or data, we need to install the memory attributes table to reflect
     // the update. The MAT logic will decide if it is a proper time to install the MAT or not.
     match memory_type {
-        efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA => {
-            if res.is_ok() {
-                MemoryAttributesTable::install();
-            }
+        efi::RUNTIME_SERVICES_CODE | efi::RUNTIME_SERVICES_DATA if res.is_ok() => {
+            MemoryAttributesTable::install();
         }
         _ => {}
     }
