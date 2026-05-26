@@ -4,11 +4,12 @@ use core::{
     fmt::{self, Display, Formatter},
 };
 
-cfg_if::cfg_if! {
-    if #[cfg(all(target_os = "uefi", target_arch = "aarch64"))] {
+cfg_select! {
+    all(target_os = "uefi", target_arch = "aarch64") => {
         use crate::aarch64::runtime_function::RuntimeFunction;
         use crate::byte_reader::read_pointer64;
-    } else {
+    }
+    _ => {
         use crate::x64::runtime_function::RuntimeFunction;
     }
 }
@@ -36,10 +37,11 @@ impl Display for StackFrame {
 
 impl StackFrame {
     fn end_of_stack(&self) -> bool {
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "aarch64")] {
+        cfg_select! {
+            target_arch = "aarch64" => {
                 self.pc == 0 || self.fp == 0
-            } else {
+            }
+            _ => {
                 self.pc == 0
             }
         }
@@ -144,8 +146,8 @@ impl StackTrace {
     pub unsafe fn dump() -> StResult<()> {
         let mut stack_frame = StackFrame::default();
 
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "aarch64")] {
+        cfg_select! {
+            target_arch = "aarch64" => {
                 // SAFETY: Inline assembly reads the current program counter
                 // (PC), stack pointer (SP), and frame pointer (FP). It does not
                 // modify memory or violate Rust safety invariants. The caller
@@ -162,7 +164,8 @@ impl StackTrace {
                         fp = out(reg) stack_frame.fp,
                     );
                 }
-            } else {
+            }
+            _ => {
                 // SAFETY: Inline assembly reads the current program counter
                 // (PC), stack pointer (SP), and frame pointer (FP) on x86_64.
                 // It does not modify the memory or violate Rust safety
@@ -242,8 +245,8 @@ impl StackTrace {
     #[coverage(off)]
     #[inline(never)]
     pub unsafe fn dump_with_fp_chain(_stack_frame: StackFrame) -> StResult<()> {
-        cfg_if::cfg_if! {
-            if #[cfg(all(target_os = "uefi", target_arch = "aarch64"))] {
+        cfg_select! {
+            all(target_os = "uefi", target_arch = "aarch64") => {
                 log::warn!("Dumping stack trace with fp chain for {}", _stack_frame);
                 log::warn!("Use `addr2line -e <.debug file> -f -C <offset>` to resolve offset to source lines");
                 log::warn!("      # Child-SP              Return Address         Call Site");
@@ -293,7 +296,8 @@ impl StackTrace {
                         break;
                     }
                 }
-            } else {
+            }
+            _ => {
                 log::error!("FP/LR register walk stack trace dumping is only supported on AArch64.");
             }
         }

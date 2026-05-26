@@ -77,10 +77,11 @@ impl super::EfiExceptionStackTrace for ExceptionContextAArch64 {
 #[coverage(off)]
 #[allow(unused)]
 pub fn enable_interrupts() {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             write_sysreg!(reg daifclr, imm 0x02, "isb sy");
-        } else {
+        }
+        _ => {
             unimplemented!()
         }
     }
@@ -89,10 +90,11 @@ pub fn enable_interrupts() {
 #[coverage(off)]
 #[allow(unused)]
 pub fn disable_interrupts() {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             write_sysreg!(reg daifset, imm 0x02, "isb sy");
-        } else {
+        }
+        _ => {
             unimplemented!()
         }
     }
@@ -101,11 +103,12 @@ pub fn disable_interrupts() {
 #[coverage(off)]
 #[allow(unused)]
 pub fn get_interrupt_state() -> Result<bool, EfiError> {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             let daif = read_sysreg!(daif);
             Ok(daif & 0x80 == 0)
-        } else {
+        }
+        _ => {
             Err(EfiError::Unsupported)
         }
     }

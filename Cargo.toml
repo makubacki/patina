@@ -6,7 +6,7 @@ members = ["components/*", "core/*", "sdk/*", "patina_dxe_core"]
 version = "21.1.0"
 license = "Apache-2.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.95"
 repository = "https://github.com/OpenDevicePartnership/patina"
 
 [workspace.dependencies]
@@ -15,7 +15,6 @@ arm-gic = { version = "0.7.2" }
 safe-mmio = { version = "0.2.5" }
 bitfield-struct = { version = "0.12" }
 brotli-decompressor = { version = "4.0.0", default-features = false }
-cfg-if = { version = "1" }
 clap = { version = '4.5.36' }
 compile-time = { version = "0.2" }
 crc32fast = { version = "1.4", default-features = false }

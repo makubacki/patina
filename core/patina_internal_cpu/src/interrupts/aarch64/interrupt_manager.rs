@@ -19,8 +19,8 @@ use crate::interrupts::{
     disable_interrupts, enable_interrupts,
 };
 
-cfg_if::cfg_if! {
-    if #[cfg(not(test))] {
+cfg_select! {
+    not(test) => {
         use core::arch::global_asm;
         use patina::{read_sysreg, write_sysreg};
         use crate::interrupts::aarch64::gic_manager::get_current_el;
@@ -33,6 +33,7 @@ cfg_if::cfg_if! {
             static sp_el0_end: u64;
         }
     }
+    _ => {}
 }
 /// AARCH64 Implementation of the InterruptManager.
 #[derive(Default, Copy, Clone)]
@@ -66,10 +67,11 @@ impl InterruptManager for InterruptsAarch64 {}
 
 #[coverage(off)]
 fn enable_fiq() {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             write_sysreg!(reg daifclr, imm 0x01, "isb sy");
-        } else {
+        }
+        _ => {
             unimplemented!()
         }
     }
@@ -77,10 +79,11 @@ fn enable_fiq() {
 
 #[coverage(off)]
 fn disable_fiq() {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             write_sysreg!(reg daifset, imm 0x01, "isb sy");
-        } else {
+        }
+        _ => {
             unimplemented!()
         }
     }
@@ -88,11 +91,12 @@ fn disable_fiq() {
 
 #[coverage(off)]
 fn get_fiq_state() -> Result<bool, EfiError> {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             let daif = read_sysreg!(daif);
             Ok(daif & 0x40 == 0)
-        } else {
+        }
+        _ => {
             Err(EfiError::Unsupported)
         }
     }
@@ -100,10 +104,11 @@ fn get_fiq_state() -> Result<bool, EfiError> {
 
 #[coverage(off)]
 fn enable_async_abort() {
-    cfg_if::cfg_if! {
-        if #[cfg(not(test))]  {
+    cfg_select! {
+        not(test) => {
             write_sysreg!(reg daifclr, imm 0x04, "isb sy");
-        } else {
+        }
+        _ => {
             unimplemented!()
         }
     }

@@ -20,7 +20,6 @@ r-efi = { workspace = true }
 patina = { workspace = true }
 spin = { workspace = true, features = ["rwlock"] }
 patina_paging = { workspace = true }
-cfg-if = { workspace = true }
 patina_stacktrace = { workspace = true }
 
 [target.'cfg(all(target_arch="x86_64"))'.dependencies]
