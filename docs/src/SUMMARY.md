@@ -40,6 +40,7 @@
 - [Process for Unstable Features](dev/unstable.md)
 - [RFC Lifecycle](rfc_lifecycle.md)
 - [RFC Template](rfc/template.md)
+- [Rust and Toolchain Version Update Process](dev/rust_version_update_process.md)
 - [Testing](dev/testing.md)
   - [Integration Testing](dev/testing/integration.md)
   - [Mocking](dev/testing/mock.md)
