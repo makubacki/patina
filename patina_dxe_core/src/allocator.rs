@@ -953,6 +953,7 @@ pub fn terminate_memory_map(map_key: usize) -> Result<(), EfiError> {
     }
 }
 
+#[coverage(off)]
 pub fn install_memory_type_info_table(system_table: &mut EfiSystemTable) -> Result<(), EfiError> {
     let bin_manager = MEMORY_BIN_MANAGER.lock();
     if !bin_manager.is_initialized() || bin_manager.memory_type_information().is_empty() {

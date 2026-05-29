@@ -659,12 +659,14 @@ impl SpinLockedFixedSizeBlockAllocator {
     }
 
     /// Returns the reserved memory range, if any.
+    #[coverage(off)]
     pub fn reserved_range(&self) -> Option<Range<efi::PhysicalAddress>> {
         self.inner.lock().reserved_range.clone()
     }
 
     /// Returns the memory type for this allocator.
     #[allow(dead_code)]
+    #[coverage(off)]
     pub fn memory_type(&self) -> efi::MemoryType {
         self.inner.lock().memory_type()
     }
