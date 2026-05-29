@@ -24,7 +24,7 @@ on:
     - cron: '0 8 * * *'
   workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [add_msrv_check_workflow_test]
     paths:
       - 'rust-toolchain.toml'
 
@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   msrv:
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MsrvCheck.yml@v0.3.12
+    uses: makubacki/patina-devops/.github/workflows/MsrvCheck.yml@add_msrv_check_workflow
     with:
       build-tasks: build-x64,build-aarch64
     secrets: inherit
