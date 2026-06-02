@@ -82,9 +82,11 @@ where
     }
 
     fn build_linked_list(buffer: &[Node<D>]) {
-        for [node, next] in buffer.array_windows::<2>() {
-            node.set_right(Some(next));
-            next.set_left(Some(node));
+        for window in buffer.windows(2) {
+            if let [node, next] = window {
+                node.set_right(Some(next));
+                next.set_left(Some(node));
+            }
         }
     }
 
