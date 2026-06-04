@@ -18,7 +18,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     branches:
-      - main
+      - update_patina_qemu_pr_val_patina_devops_dep_test
       - major
       - feature/**/*
 
