@@ -14,10 +14,10 @@
 use core::cmp::Ordering;
 
 use crate::pi::{
-    hob::Hob,
+    hob::{Hob, MEMORY_TYPE_INFO_HOB_GUID},
     serializable::{Interval, format_guid, hex_format},
 };
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 
 /// Serializable representation of the different HOB types.
@@ -50,6 +50,14 @@ pub enum HobSerDe {
     GuidExtension {
         name: String,
     },
+    /// Memory Type Information GUID Extension HOB (Name == `MEMORY_TYPE_INFO_HOB_GUID`).
+    ///
+    /// The HOB's data payload is parsed into an array of
+    /// `(memory_type, number_of_pages)` entries up to (but not including)
+    /// the sentinel entry whose `memory_type` is `>= EFI_MAX_MEMORY_TYPE`.
+    MemoryTypeInformation {
+        entries: Vec<MemoryTypeInfoEntrySerDe>,
+    },
     FirmwareVolume {
         #[serde(with = "hex_format")]
         base_address: u64,
@@ -60,6 +68,37 @@ pub enum HobSerDe {
         size_of_io_space: u8,
     },
     UnknownHob,
+}
+
+/// Serializable representation of one `EFI_MEMORY_TYPE_INFORMATION` entry inside a Memory
+/// Type Information GUID Extension HOB.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemoryTypeInfoEntrySerDe {
+    /// `EFI_MEMORY_TYPE` value for this bin (e.g. `EfiRuntimeServicesData = 6`).
+    pub memory_type: u32,
+    /// Number of 4 KiB pages requested for this bin.
+    pub number_of_pages: u32,
+}
+
+/// Parses the data payload of a Memory Type Information GUID Extension HOB.
+///
+/// Each entry is `(u32 memory_type, u32 number_of_pages)` in little-endian order. Parsing
+/// stops at (and excludes) the sentinel entry whose `memory_type` is `>= EFI_MAX_MEMORY_TYPE`.
+fn parse_memory_type_info_entries(data: &[u8]) -> Vec<MemoryTypeInfoEntrySerDe> {
+    const ENTRY_SIZE: usize = core::mem::size_of::<MemoryTypeInfoEntrySerDe>();
+    let mut entries = Vec::new();
+    for chunk in data.chunks_exact(ENTRY_SIZE) {
+        let &[m0, m1, m2, m3, p0, p1, p2, p3] = chunk else {
+            continue;
+        };
+        let memory_type = u32::from_le_bytes([m0, m1, m2, m3]);
+        let number_of_pages = u32::from_le_bytes([p0, p1, p2, p3]);
+        if (memory_type as usize) >= crate::efi_types::EFI_MAX_MEMORY_TYPE {
+            break;
+        }
+        entries.push(MemoryTypeInfoEntrySerDe { memory_type, number_of_pages });
+    }
+    entries
 }
 
 /// Serializable representation of the memory allocation descriptor inside a Memory Allocation HOB.
@@ -188,7 +227,13 @@ impl From<&Hob<'_>> for HobSerDe {
                 },
                 attributes: resource_desc2.attributes,
             },
-            Hob::GuidHob(guid_ext, _) => Self::GuidExtension { name: format_guid(&guid_ext.name) },
+            Hob::GuidHob(guid_ext, data) => {
+                if guid_ext.name == MEMORY_TYPE_INFO_HOB_GUID.into_inner() {
+                    Self::MemoryTypeInformation { entries: parse_memory_type_info_entries(data) }
+                } else {
+                    Self::GuidExtension { name: format_guid(&guid_ext.name) }
+                }
+            }
             Hob::FirmwareVolume(fv) => Self::FirmwareVolume { base_address: fv.base_address, length: fv.length },
             Hob::Cpu(cpu) => {
                 Self::Cpu { size_of_memory_space: cpu.size_of_memory_space, size_of_io_space: cpu.size_of_io_space }
@@ -452,5 +497,44 @@ mod tests {
         assert!(json.contains(r#""type": "cpu""#), "CPU HOB missing");
         assert!(json.contains(r#""size_of_memory_space": 0"#), "CPU memory space size incorrect");
         assert!(json.contains(r#""size_of_io_space": 0"#), "CPU IO space size incorrect");
+    }
+
+    #[test]
+    fn test_memory_type_information_hob_serialization() {
+        // Two valid entries followed by a sentinel entry whose memory_type is >= EFI_MAX_MEMORY_TYPE.
+        let mut data = Vec::new();
+        data.extend_from_slice(&6_u32.to_le_bytes()); // EfiRuntimeServicesData
+        data.extend_from_slice(&100_u32.to_le_bytes());
+        data.extend_from_slice(&9_u32.to_le_bytes()); // EfiACPIReclaimMemory
+        data.extend_from_slice(&200_u32.to_le_bytes());
+        data.extend_from_slice(&u32::MAX.to_le_bytes()); // sentinel
+        data.extend_from_slice(&999_u32.to_le_bytes()); // ignored sentinel pages
+
+        let guid_hob = hob::GuidHob {
+            header: hob::header::Hob {
+                r#type: hob::GUID_EXTENSION,
+                length: (size_of::<hob::GuidHob>() + data.len()) as u16,
+                reserved: 0,
+            },
+            name: MEMORY_TYPE_INFO_HOB_GUID,
+        };
+
+        let serde = HobSerDe::from(&Hob::GuidHob(&guid_hob, &data));
+        let json = to_string_pretty(&serde).expect("Serialization failed");
+
+        let HobSerDe::MemoryTypeInformation { entries } = serde else {
+            panic!("Expected MemoryTypeInformation variant");
+        };
+
+        assert_eq!(
+            entries,
+            alloc::vec![
+                MemoryTypeInfoEntrySerDe { memory_type: 6, number_of_pages: 100 },
+                MemoryTypeInfoEntrySerDe { memory_type: 9, number_of_pages: 200 },
+            ]
+        );
+
+        assert!(json.contains(r#""type": "memory_type_information""#), "Memory Type Information HOB missing");
+        assert!(json.contains(r#""number_of_pages": 200"#), "Entry page count incorrect");
     }
 }
