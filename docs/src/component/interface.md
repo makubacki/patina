@@ -107,6 +107,9 @@ enforces parameter validation for pre-defined parameter types, detecting conflic
 - `&mut Storage` combined with `Config<T>` or `ConfigMut<T>`
 - `&Storage` combined with `ConfigMut<T>`
 - Multiple `Commands`, `StandardBootServices`, or `StandardRuntimeServices` parameters
+
+These rules also apply to parameters nested inside `Option<P>` and tuples. The same rules are enforced at runtime for
+custom parameter types that the macro cannot inspect.
 ```
 
 ### Config\<T\> / ConfigMut\<T\>

@@ -86,9 +86,10 @@ In terms of registration, `Component::initialize` is used to register any data a
 component's metadata. The scheduler can use the access set of each component for scheduling parallel execution of
 components, though this is not yet implemented.
 
-In terms of validation, Patina-defined parameter types are validated at compile time. Custom parameter types are
-validated in `Component::initialize`. This is done via the access set mentioned above. As an example, a component that
-uses `ConfigMut<T>` and `Config<T>` is invalid. You cannot have mutable and immutable access to the same data.
+In terms of validation, Patina-defined parameter types are validated at compile time by the `#[component]` macro, while
+all parameter types, including custom ones, are validated at runtime during `Component::initialize`. Both paths share
+the same conflict rules. As an example, a component that uses `ConfigMut<T>` and `Config<T>` of the same type is
+invalid. You cannot have mutable and immutable access to the same data.
 
 Once the component and its params are fully registered, the component is stored for dispatch.
 
