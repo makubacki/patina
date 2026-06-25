@@ -106,6 +106,7 @@ use crate::{
     boot_services::StandardBootServices,
     component::{
         metadata::MetaData,
+        param_conflict::ParamKind,
         service::IntoService,
         storage::{Deferred, Storage, UnsafeStorageCell},
     },
@@ -429,22 +430,8 @@ unsafe impl<T: Default + 'static> Param for Config<'_, T> {
 
     fn init_state(storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
         let id = storage.add_config_default_if_not_present::<T>();
-
-        if meta.access().has_writes_all_configs() {
-            return Err(Cow::from(alloc::format!(
-                "Config<{}> conflicts with a previous &mut Storage access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        if meta.access().has_config_write(id) {
-            return Err(Cow::from(alloc::format!(
-                "Config<{0}> conflicts with a previous ConfigMut<{0}> access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        meta.access_mut().add_config_read(id);
+        let ty = super::type_name::normalized::<T>();
+        meta.access_mut().register(ParamKind::Config, Some(id), Some(&ty))?;
         Ok(id)
     }
 }
@@ -538,39 +525,10 @@ unsafe impl<T: Default + 'static> Param for ConfigMut<'_, T> {
 
     fn init_state(storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
         let id = storage.add_config_default_if_not_present::<T>();
-        // All config is locked by default. We only unlock it (like below) when a component is detected that needs
-        // it to be mutable.
+        // All config is locked by default. We only unlock it when a component is detected that needs it to be mutable.
         storage.unlock_config(id);
-
-        if meta.access().has_writes_all_configs() {
-            return Err(Cow::from(alloc::format!(
-                "ConfigMut<{}> conflicts with a previous &mut Storage access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        if meta.access().has_reads_all_configs() {
-            return Err(Cow::from(alloc::format!(
-                "ConfigMut<{}> conflicts with a previous &Storage access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        if meta.access().has_config_write(id) {
-            return Err(Cow::from(alloc::format!(
-                "ConfigMut<{0}> conflicts with a previous ConfigMut<{0}> access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        if meta.access().has_config_read(id) {
-            return Err(Cow::from(alloc::format!(
-                "ConfigMut<{0}> conflicts with a previous Config<{0}> access.",
-                super::type_name::normalized::<T>()
-            )));
-        }
-
-        meta.access_mut().add_config_write(id);
+        let ty = super::type_name::normalized::<T>();
+        meta.access_mut().register(ParamKind::ConfigMut, Some(id), Some(&ty))?;
         Ok(id)
     }
 }
@@ -656,11 +614,7 @@ unsafe impl Param for Commands<'_> {
     }
 
     fn init_state(_storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
-        if meta.access().has_deferred() {
-            return Err(Cow::from("Commands conflicts with a previous Commands access."));
-        }
-
-        meta.access_mut().deferred();
+        meta.access_mut().register(ParamKind::Commands, None, None)?;
         Ok(())
     }
 }
@@ -685,7 +639,8 @@ unsafe impl Param for StandardBootServices {
         unsafe { storage.storage() }.boot_services().is_init()
     }
 
-    fn init_state(_storage: &mut Storage, _meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
+    fn init_state(_storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
+        meta.access_mut().register(ParamKind::BootServices, None, None)?;
         Ok(())
     }
 }
@@ -710,7 +665,8 @@ unsafe impl Param for StandardRuntimeServices {
         unsafe { storage.storage() }.runtime_services().is_init()
     }
 
-    fn init_state(_storage: &mut Storage, _meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
+    fn init_state(_storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
+        meta.access_mut().register(ParamKind::RuntimeServices, None, None)?;
         Ok(())
     }
 }
@@ -1286,7 +1242,7 @@ mod tests {
         assert!(<&mut Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <Config<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "Config<i32> conflicts with a previous &mut Storage access."
+            "You cannot use &mut Storage together with Config<i32> or ConfigMut<i32> parameters."
         );
 
         // Scenario 2: `ConfigMut<T>`` conflicts with `Config<T>`
@@ -1295,7 +1251,7 @@ mod tests {
         assert!(<ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <Config<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "Config<i32> conflicts with a previous ConfigMut<i32> access."
+            "You cannot have both Config<i32> and ConfigMut<i32> for the same type."
         );
     }
 
@@ -1307,7 +1263,7 @@ mod tests {
         assert!(<&mut Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "ConfigMut<i32> conflicts with a previous &mut Storage access."
+            "You cannot use &mut Storage together with Config<i32> or ConfigMut<i32> parameters."
         );
 
         // Scenario 2: `&Storage` conflicts with `ConfigMut<T>`
@@ -1316,7 +1272,7 @@ mod tests {
         assert!(<&Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "ConfigMut<i32> conflicts with a previous &Storage access."
+            "You cannot use &Storage together with ConfigMut<i32> parameters."
         );
 
         // Scenario 3: `Config<T>` conflicts with `ConfigMut<T>`
@@ -1325,7 +1281,7 @@ mod tests {
         assert!(<Config<i32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "ConfigMut<i32> conflicts with a previous Config<i32> access."
+            "You cannot have both Config<i32> and ConfigMut<i32> for the same type."
         );
 
         // Scenario 4: `ConfigMut<T>` conflicts with `ConfigMut<T>`
@@ -1334,7 +1290,7 @@ mod tests {
         assert!(<ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <ConfigMut<i32> as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "ConfigMut<i32> conflicts with a previous ConfigMut<i32> access."
+            "Each ConfigMut<i32> type can only appear once in a component's entry point."
         );
     }
 
@@ -1346,7 +1302,7 @@ mod tests {
         assert!(<Commands as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <Commands as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "Commands conflicts with a previous Commands access."
+            "Only one Commands parameter is allowed."
         );
     }
 }

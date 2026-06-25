@@ -9,10 +9,9 @@
 //! Copyright (c) Microsoft Corporation.
 //!
 //! SPDX-License-Identifier: Apache-2.0
-use core::fmt;
-use fixedbitset::FixedBitSet;
+use alloc::{borrow::Cow, string::String, vec::Vec};
 
-use alloc::borrow::Cow;
+use crate::component::param_conflict::{ParamKind, conflict};
 
 /// Metadata for a component. Not used for execution, but referenced by the scheduler.
 #[derive(Default, Debug)]
@@ -54,126 +53,47 @@ impl MetaData {
     pub(crate) fn access_mut(&mut self) -> &mut Access {
         &mut self.access
     }
-
-    /// Returns immutable access to the param usage metadata for the component.
-    #[inline(always)]
-    pub(crate) fn access(&self) -> &Access {
-        &self.access
-    }
 }
 
 /// Access requirements for a component.
-#[derive(Default)]
+///
+/// Records the conflict-relevant parameters registered during component initialization so
+/// that incompatible combinations can be rejected.
+#[derive(Default, Debug)]
 pub struct Access {
-    /// Write accesses to a config resource.
-    config_writes: FixedBitSet,
-    /// All accesses to a config resource.
-    config_read_and_writes: FixedBitSet,
-    /// is `true` if the component has access to all config resources.
-    reads_all_configs: bool,
-    /// is `true` if the component has mutable access to all config resources.
-    writes_all_configs: bool,
-    /// is `true` if the component accesses the deferred queue.
-    has_deferred: bool,
+    /// Registered parameters as `(kind, config id, config type name)`. The config id and
+    /// type name identify the resource for `Config`/`ConfigMut` parameters and are `None`
+    /// for all other kinds.
+    params: Vec<(ParamKind, Option<usize>, Option<String>)>,
 }
 
 impl Access {
-    /// Creates a new `Access` instance with no registered accesses.
+    /// Creates a new `Access` instance with no registered parameters.
     pub const fn new() -> Self {
-        Self {
-            config_writes: FixedBitSet::new(),
-            config_read_and_writes: FixedBitSet::new(),
-            reads_all_configs: false,
-            writes_all_configs: false,
-            has_deferred: false,
+        Self { params: Vec::new() }
+    }
+
+    /// Registers a parameter of the given `kind`, returning an error message if it conflicts
+    /// with a previously registered parameter.
+    ///
+    /// `config_id` and `type_name` identify the config resource for `Config`/`ConfigMut`
+    /// parameters and are `None` for all other kinds. `type_name` is used to make conflict
+    /// messages refer to the concrete type.
+    pub fn register(
+        &mut self,
+        kind: ParamKind,
+        config_id: Option<usize>,
+        type_name: Option<&str>,
+    ) -> Result<(), Cow<'static, str>> {
+        for (prior_kind, prior_id, prior_type) in &self.params {
+            let same_resource = config_id.is_some() && config_id == *prior_id;
+            let ty = type_name.or(prior_type.as_deref());
+            if let Some(message) = conflict(kind, *prior_kind, same_resource, ty) {
+                return Err(Cow::from(message));
+            }
         }
-    }
-}
-
-impl Access {
-    /// Registers a write access to the specified config resource.
-    pub fn add_config_write(&mut self, id: usize) {
-        self.config_writes.grow_and_insert(id);
-        self.config_read_and_writes.grow_and_insert(id);
-    }
-
-    /// Registers a read access to a config resource.
-    pub fn add_config_read(&mut self, id: usize) {
-        self.config_read_and_writes.grow_and_insert(id);
-    }
-
-    /// Returns whether the component needs write access to the config resources denoted by `id`.
-    pub fn has_config_write(&self, id: usize) -> bool {
-        self.writes_all_configs | self.config_writes.contains(id)
-    }
-
-    /// Returns whether the component needs read access to the config resources denoted by `id`.
-    pub fn has_config_read(&self, id: usize) -> bool {
-        self.reads_all_configs | self.config_read_and_writes.contains(id)
-    }
-
-    /// Returns whether or not the component accesses any config resources mutablely.
-    pub fn has_any_config_write(&self) -> bool {
-        self.writes_all_configs | (self.config_writes.count_ones(..) > 0)
-    }
-
-    /// Returns whether or not the component accesses any config resources at all.
-    pub fn has_any_config_read(&self) -> bool {
-        self.reads_all_configs | (self.config_read_and_writes.count_ones(..) > 0)
-    }
-
-    /// Returns whether the component has exclusive access to all config resources
-    pub fn has_writes_all_configs(&self) -> bool {
-        self.writes_all_configs
-    }
-
-    /// Returns whether the component has readonly access to all config resources
-    pub fn has_reads_all_configs(&self) -> bool {
-        self.reads_all_configs
-    }
-
-    /// Returns whether or not the component has the ability to register a deferred action.
-    pub fn has_deferred(&self) -> bool {
-        self.has_deferred
-    }
-
-    /// Marks the component as having exclusive read-only access to all config resources.
-    pub fn reads_all_configs(&mut self) {
-        self.reads_all_configs = true;
-    }
-
-    /// Marks the component as having exclusive mutable access to all config resources.
-    pub fn writes_all_configs(&mut self) {
-        self.writes_all_configs = true;
-        self.reads_all_configs = true;
-    }
-
-    /// Marks the component as being able to register a deferred action.
-    pub fn deferred(&mut self) {
-        self.has_deferred = true;
-    }
-}
-
-impl fmt::Debug for Access {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Access")
-            .field("reads_all_configs", &self.reads_all_configs)
-            .field("writes_all_configs", &self.writes_all_configs)
-            .field("config_writes", &PrettyFixedBitSet(&self.config_writes))
-            .field(
-                "config_reads",
-                &PrettyFixedBitSet(&self.config_read_and_writes.difference(&self.config_writes).collect()),
-            )
-            .finish()
-    }
-}
-
-/// A type redefinition of [FixedBitSet] to allow a custom [Debug] implementation.
-pub struct PrettyFixedBitSet<'a>(&'a FixedBitSet);
-
-impl fmt::Debug for PrettyFixedBitSet<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.0.ones().map(|i| i as u32)).finish()
+        self.params.push((kind, config_id, type_name.map(String::from)));
+        Ok(())
     }
 }
 
@@ -181,79 +101,35 @@ impl fmt::Debug for PrettyFixedBitSet<'_> {
 #[coverage(off)]
 mod tests {
     use super::*;
-    extern crate std;
 
     #[test]
-    fn test_debug_view_calculates_config_reads_correctly() {
+    fn test_register_allows_independent_params() {
         let mut access = Access::new();
-        access.add_config_write(0);
-        access.add_config_read(1);
-        access.reads_all_configs();
-        access.writes_all_configs();
-
-        assert_eq!(
-            std::format!("{access:?}"),
-            "Access { reads_all_configs: true, writes_all_configs: true, config_writes: [0], config_reads: [1] }"
-        );
+        assert!(access.register(ParamKind::Config, Some(0), Some("u32")).is_ok());
+        assert!(access.register(ParamKind::Config, Some(1), Some("i32")).is_ok());
+        assert!(access.register(ParamKind::Commands, None, None).is_ok());
     }
 
     #[test]
-    fn test_write_config_marks_as_read_also() {
+    fn test_register_detects_duplicate_config_mut() {
         let mut access = Access::new();
-
-        access.add_config_write(0);
-
-        assert!(access.has_config_read(0));
-        assert!(access.has_config_write(0));
-
-        assert!(!access.has_config_read(1));
-        assert!(!access.has_config_write(1));
-
-        assert!(access.has_any_config_read());
-        assert!(access.has_any_config_write());
+        assert!(access.register(ParamKind::ConfigMut, Some(0), Some("u32")).is_ok());
+        assert!(access.register(ParamKind::ConfigMut, Some(0), Some("u32")).is_err());
+        // A different config resource does not conflict.
+        assert!(access.register(ParamKind::ConfigMut, Some(1), Some("i32")).is_ok());
     }
 
     #[test]
-    fn test_read_config_does_not_mark_config_write() {
+    fn test_register_detects_config_and_config_mut_same_resource() {
         let mut access = Access::new();
-
-        access.add_config_read(0);
-
-        assert!(access.has_any_config_read());
-        assert!(access.has_config_read(0));
-
-        assert!(!access.has_any_config_write());
-        assert!(!access.has_config_write(0));
-
-        assert!(!access.has_config_read(1));
-        assert!(!access.has_config_write(1));
+        assert!(access.register(ParamKind::Config, Some(0), Some("u32")).is_ok());
+        assert!(access.register(ParamKind::ConfigMut, Some(0), Some("u32")).is_err());
     }
 
     #[test]
-    fn test_reads_all_configs_does_not_mark_config_write() {
+    fn test_register_detects_duplicate_singletons() {
         let mut access = Access::new();
-        access.reads_all_configs();
-
-        for i in 0..10 {
-            assert!(access.has_config_read(i));
-            assert!(!access.has_config_write(i));
-        }
-
-        assert!(access.has_any_config_read());
-        assert!(!access.has_any_config_write());
-    }
-
-    #[test]
-    fn test_writes_all_configs_marks_config_read_also() {
-        let mut access = Access::new();
-        access.writes_all_configs();
-
-        for i in 0..10 {
-            assert!(access.has_config_read(i));
-            assert!(access.has_config_write(i));
-        }
-
-        assert!(access.has_any_config_read());
-        assert!(access.has_any_config_write());
+        assert!(access.register(ParamKind::Commands, None, None).is_ok());
+        assert!(access.register(ParamKind::Commands, None, None).is_err());
     }
 }

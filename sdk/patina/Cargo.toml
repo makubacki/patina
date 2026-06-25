@@ -27,7 +27,6 @@ name = "basic_hob_usage"
 
 [dependencies]
 patina_macro = { workspace = true }
-fixedbitset = { workspace = true, optional = true }
 
 bitvec = { workspace = true }
 cfg-if = { workspace = true }
@@ -69,7 +68,7 @@ trybuild = { version = "1.0", features = ["diff"] }
 core = ['alloc']
 std = ['alloc']
 doc = ['alloc']
-alloc = ["dep:goblin", "dep:fixedbitset"]
+alloc = ["dep:goblin"]
 mockall = ["dep:mockall", "std"]
 global_allocator = []
 default = ['alloc']

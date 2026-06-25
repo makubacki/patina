@@ -138,6 +138,7 @@
 //!
 pub mod hob;
 mod metadata;
+mod param_conflict;
 pub mod params;
 pub mod service;
 mod storage;

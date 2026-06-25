@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use crate::{
-    component::{metadata::MetaData, params::Param},
+    component::{metadata::MetaData, param_conflict::ParamKind, params::Param},
     runtime_services::StandardRuntimeServices,
 };
 
@@ -553,26 +553,7 @@ unsafe impl Param for &mut Storage {
     }
 
     fn init_state(_storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
-        // Storage provides global access to configuration. That means by manipulating the storage,
-        // we can invalidate any config access, so we make sure no other config access has been
-        // registered, and set ourselves as exclusive.
-        if meta.access().has_writes_all_configs() {
-            return Err(Cow::from("&mut Storage conflicts with a previous &mut Storage access."));
-        }
-
-        if meta.access().has_reads_all_configs() {
-            return Err(Cow::from("&mut Storage conflicts with a previous &Storage access."));
-        }
-
-        if meta.access().has_any_config_write() {
-            return Err(Cow::from("&mut Storage conflicts with a previous ConfigMut<T> access."));
-        }
-
-        if meta.access().has_any_config_read() {
-            return Err(Cow::from("&mut Storage conflicts with a previous Config<T> access."));
-        }
-
-        meta.access_mut().writes_all_configs();
+        meta.access_mut().register(ParamKind::StorageMut, None, None)?;
         Ok(())
     }
 }
@@ -602,15 +583,7 @@ unsafe impl Param for &Storage {
     }
 
     fn init_state(_storage: &mut Storage, meta: &mut MetaData) -> Result<Self::State, Cow<'static, str>> {
-        if meta.access().has_writes_all_configs() {
-            return Err(Cow::from("&Storage conflicts with a previous &mut Storage access."));
-        }
-
-        if meta.access().has_any_config_write() {
-            return Err(Cow::from("&Storage conflicts with a previous ConfigMut<T> access."));
-        }
-
-        meta.access_mut().reads_all_configs();
+        meta.access_mut().register(ParamKind::Storage, None, None)?;
         Ok(())
     }
 }
@@ -758,7 +731,7 @@ mod tests {
         assert!(<&mut Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&mut Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&mut Storage conflicts with a previous &mut Storage access."
+            "Only one &mut Storage parameter is allowed."
         );
 
         // Scenario 2: `&Storage` + `&mut Storage` conflict
@@ -767,7 +740,7 @@ mod tests {
         assert!(<&Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&mut Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&mut Storage conflicts with a previous &Storage access."
+            "You cannot use &mut Storage together with &Storage parameters."
         );
 
         // Scenario 3: `ConfigMut<T>` + `&mut Storage` conflict
@@ -776,7 +749,7 @@ mod tests {
         assert!(<crate::component::params::ConfigMut<u32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&mut Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&mut Storage conflicts with a previous ConfigMut<T> access."
+            "You cannot use &mut Storage together with Config<u32> or ConfigMut<u32> parameters."
         );
 
         // Scenario 4: `Config<T>` + `&mut Storage` conflict
@@ -785,7 +758,7 @@ mod tests {
         assert!(<crate::component::params::Config<u32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&mut Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&mut Storage conflicts with a previous Config<T> access."
+            "You cannot use &mut Storage together with Config<u32> or ConfigMut<u32> parameters."
         );
     }
 
@@ -800,7 +773,7 @@ mod tests {
         assert!(<&mut Storage as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&Storage conflicts with a previous &mut Storage access."
+            "You cannot use &mut Storage together with &Storage parameters."
         );
 
         // Scenario 2: `ConfigMut<T>` + `&Storage` conflict
@@ -809,7 +782,7 @@ mod tests {
         assert!(<crate::component::params::ConfigMut<u32> as Param>::init_state(&mut storage, &mut metadata).is_ok());
         assert_eq!(
             <&Storage as Param>::init_state(&mut storage, &mut metadata).unwrap_err(),
-            "&Storage conflicts with a previous ConfigMut<T> access."
+            "You cannot use &Storage together with ConfigMut<u32> parameters."
         );
     }
 }
