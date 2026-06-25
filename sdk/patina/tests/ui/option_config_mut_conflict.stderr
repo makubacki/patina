@@ -1,0 +1,11 @@
+error: Patina component parameter conflict detected: parameter '_maybe' (position 2) conflicts with parameter '_config' (position 1). Each ConfigMut<u32> type can only appear once in a component's entry point.
+  --> tests/ui/option_config_mut_conflict.rs:12:51
+   |
+12 |     fn entry_point(self, _config: ConfigMut<u32>, _maybe: Option<ConfigMut<u32>>) -> Result<()> {
+   |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: first '_config' parameter here
+  --> tests/ui/option_config_mut_conflict.rs:12:26
+   |
+12 |     fn entry_point(self, _config: ConfigMut<u32>, _maybe: Option<ConfigMut<u32>>) -> Result<()> {
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^

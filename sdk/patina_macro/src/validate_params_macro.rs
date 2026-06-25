@@ -356,22 +356,55 @@ fn classify_param(ty: &Type) -> (ParamKind, Option<String>) {
     }
 }
 
+/// Returns the first generic type argument of a path type, e.g. `P` in `Option<P>`.
+fn first_generic_type(path: &TypePath) -> Option<&Type> {
+    if let Some(segment) = path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ty)) = args.args.first()
+    {
+        return Some(ty);
+    }
+    None
+}
+
+/// Expands a parameter type into the conflict-relevant kinds it contributes, unwrapping
+/// `Option<P>` and flattening tuples so their members are validated like top-level params.
+fn collect_param_kinds(ty: &Type, out: &mut Vec<(ParamKind, Option<String>)>) {
+    match ty {
+        Type::Path(type_path) if get_base_type_name(&type_path.path).as_deref() == Some("Option") => {
+            match first_generic_type(type_path) {
+                Some(inner) => collect_param_kinds(inner, out),
+                None => out.push((ParamKind::Other, None)),
+            }
+        }
+        Type::Tuple(tuple) => {
+            for elem in &tuple.elems {
+                collect_param_kinds(elem, out);
+            }
+        }
+        _ => out.push(classify_param(ty)),
+    }
+}
+
 /// Check for parameter conflicts and return compile error if found
 /// Checks for parameter conflicts in the function signature.
 pub(crate) fn check_param_conflicts(func: &ItemFn) -> Result<(), TokenStream> {
     let mut params: Vec<(usize, ParamKind, Option<String>, String, proc_macro2::Span)> = Vec::new();
 
-    // Collect all parameters (skip 'self')
+    // Collect all parameters (skip 'self'), expanding Option<P> and tuples into their members.
     for (idx, arg) in func.sig.inputs.iter().enumerate() {
         if let FnArg::Typed(pat_type) = arg {
-            let (kind, inner) = classify_param(&pat_type.ty);
             let param_name = match &*pat_type.pat {
                 Pat::Ident(ident) => ident.ident.to_string(),
                 _ => format!("param_{}", idx),
             };
             // Get the span of the entire parameter (pattern + type)
             let param_span = pat_type.span();
-            params.push((idx, kind, inner, param_name, param_span));
+            let mut kinds = Vec::new();
+            collect_param_kinds(&pat_type.ty, &mut kinds);
+            for (kind, inner) in kinds {
+                params.push((idx, kind, inner, param_name.clone(), param_span));
+            }
         }
     }
 
@@ -684,6 +717,44 @@ mod tests {
     fn test_allows_single_commands() {
         let input = quote! {
             fn entry_point(comp: MyComponent, cmd: Commands) -> Result<()> {
+                Ok(())
+            }
+        };
+
+        let result = validate_component_params2(quote!(), input);
+        assert!(!result.to_string().contains("compile_error"));
+    }
+
+    #[test]
+    fn test_detects_conflict_inside_option() {
+        let input = quote! {
+            fn entry_point(self, c1: ConfigMut<u32>, c2: Option<ConfigMut<u32>>) -> Result<()> {
+                Ok(())
+            }
+        };
+
+        let result = validate_component_params2(quote!(), input);
+        assert!(result.to_string().contains("compile_error"));
+        assert!(result.to_string().contains("ConfigMut"));
+    }
+
+    #[test]
+    fn test_detects_conflict_inside_tuple() {
+        let input = quote! {
+            fn entry_point(self, params: (ConfigMut<u32>, Config<u32>)) -> Result<()> {
+                Ok(())
+            }
+        };
+
+        let result = validate_component_params2(quote!(), input);
+        assert!(result.to_string().contains("compile_error"));
+        assert!(result.to_string().contains("Patina component parameter conflict detected"));
+    }
+
+    #[test]
+    fn test_allows_option_and_tuple_without_conflict() {
+        let input = quote! {
+            fn entry_point(self, a: Option<ConfigMut<u32>>, b: (Config<String>, Commands)) -> Result<()> {
                 Ok(())
             }
         };

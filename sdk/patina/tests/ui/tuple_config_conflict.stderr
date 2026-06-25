@@ -1,0 +1,11 @@
+error: Patina component parameter conflict detected: parameter '_params' (position 1) conflicts with parameter '_params' (position 1). You cannot have both Config<u32> and ConfigMut<u32> for the same type.
+  --> tests/ui/tuple_config_conflict.rs:15:26
+   |
+15 |     fn entry_point(self, _params: (ConfigMut<u32>, Config<u32>)) -> Result<()> {
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: conflicts with '_params' parameter here
+  --> tests/ui/tuple_config_conflict.rs:15:26
+   |
+15 |     fn entry_point(self, _params: (ConfigMut<u32>, Config<u32>)) -> Result<()> {
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
