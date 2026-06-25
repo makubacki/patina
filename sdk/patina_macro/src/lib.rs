@@ -9,7 +9,10 @@
 
 #![feature(coverage_attribute)]
 
+extern crate alloc;
+
 mod hob_macro;
+mod param_conflict;
 mod service_macro;
 mod smbios_record_macro;
 mod test_macro;

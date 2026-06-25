@@ -1,4 +1,4 @@
-error: Patina component parameter conflict detected: parameter '_config' (position 2) conflicts with parameter '_storage' (position 1). You cannot use &Storage together with ConfigMut<T> parameters.
+error: Patina component parameter conflict detected: parameter '_config' (position 2) conflicts with parameter '_storage' (position 1). You cannot use &Storage together with ConfigMut<u32> parameters.
   --> tests/ui/storage_with_config_mut.rs:12:46
    |
 12 |     fn entry_point(self, _storage: &Storage, _config: ConfigMut<u32>) -> Result<()> {

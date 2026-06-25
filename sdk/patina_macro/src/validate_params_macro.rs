@@ -11,6 +11,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, Type, TypePath, parse2, spanned::Spanned};
 
+use crate::param_conflict::{ParamKind, conflict};
+
 /// Validates component impl blocks with a unified `#[component]` attribute.
 ///
 /// This macro must be applied to impl blocks that define components. It does the following:
@@ -223,78 +225,6 @@ pub(crate) fn validate_component_params2(_attr: TokenStream, item: TokenStream) 
     quote! { #func }
 }
 
-/// Represents a parameter type we care about for conflict detection
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ParamType {
-    Config(String),          // Config<T> where String is T
-    ConfigMut(String),       // ConfigMut<T> where String is T
-    Storage,                 // &Storage
-    StorageMut,              // &mut Storage
-    Commands,                // Commands
-    StandardBootServices,    // StandardBootServices (UEFI Boot Services)
-    StandardRuntimeServices, // StandardRuntimeServices (UEFI Runtime Services)
-    Other,                   // Any other parameter type
-}
-
-impl ParamType {
-    /// Checks if this parameter type conflicts with another parameter type.
-    ///
-    /// Returns `Some(error_message)` if there is a conflict, or `None` if there is no conflict.
-    /// The error message describes the nature of the conflict.
-    fn conflicts_with(&self, other: &ParamType) -> Option<&'static str> {
-        match (self, other) {
-            // Duplicate ConfigMut<T> with the same inner type
-            (ParamType::ConfigMut(t1), ParamType::ConfigMut(t2)) if t1 == t2 => {
-                Some("Each ConfigMut<T> type can only appear once in a component's entry point.")
-            }
-
-            // Config<T> conflicts with ConfigMut<T> for the same type
-            (ParamType::Config(t1), ParamType::ConfigMut(t2)) | (ParamType::ConfigMut(t1), ParamType::Config(t2))
-                if t1 == t2 =>
-            {
-                Some("You cannot have both Config<T> and ConfigMut<T> for the same type.")
-            }
-
-            // &mut Storage conflicts with Config<T> or ConfigMut<T>
-            (ParamType::StorageMut, ParamType::Config(_))
-            | (ParamType::Config(_), ParamType::StorageMut)
-            | (ParamType::StorageMut, ParamType::ConfigMut(_))
-            | (ParamType::ConfigMut(_), ParamType::StorageMut) => {
-                Some("You cannot use &mut Storage together with Config<T> or ConfigMut<T> parameters.")
-            }
-
-            // &Storage conflicts with ConfigMut<T>
-            (ParamType::Storage, ParamType::ConfigMut(_)) | (ParamType::ConfigMut(_), ParamType::Storage) => {
-                Some("You cannot use &Storage together with ConfigMut<T> parameters.")
-            }
-
-            // Duplicate Commands
-            (ParamType::Commands, ParamType::Commands) => Some("Only one Commands parameter is allowed."),
-
-            // Duplicate StandardBootServices
-            (ParamType::StandardBootServices, ParamType::StandardBootServices) => {
-                Some("Only one StandardBootServices parameter is allowed.")
-            }
-
-            // Duplicate StandardRuntimeServices
-            (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
-                Some("Only one StandardRuntimeServices parameter is allowed.")
-            }
-
-            // StorageMut conflicts with Storage (a mutable reference must be exclusive)
-            (ParamType::StorageMut, ParamType::Storage) | (ParamType::Storage, ParamType::StorageMut) => {
-                Some("You cannot use &mut Storage together with &Storage parameters.")
-            }
-
-            // Duplicate StorageMut (only one mutable reference is allowed)
-            (ParamType::StorageMut, ParamType::StorageMut) => Some("Only one &mut Storage parameter is allowed."),
-
-            // No conflict
-            _ => None,
-        }
-    }
-}
-
 /// Normalize a type path to its canonical string representation.
 ///
 /// Converts type paths to a consistent format that allows comparing
@@ -369,126 +299,106 @@ fn get_base_type_name(path: &syn::Path) -> Option<String> {
     path.segments.last().map(|seg| seg.ident.to_string())
 }
 
-/// Classify a parameter type
-fn classify_param(ty: &Type) -> ParamType {
+/// Classify a parameter type into its [ParamKind] and, for config parameters, the
+/// normalized inner type used to decide whether two parameters target the same config.
+fn classify_param(ty: &Type) -> (ParamKind, Option<String>) {
     match ty {
         Type::Path(type_path) => {
-            // Get the base type name (last segment) for matching
             let base_name = match get_base_type_name(&type_path.path) {
                 Some(name) => name,
-                None => return ParamType::Other,
+                None => return (ParamKind::Other, None),
             };
 
-            // Check for Config<T>
             if base_name == "Config"
                 && let Some(inner) = extract_generic_inner(type_path)
             {
-                return ParamType::Config(inner);
+                return (ParamKind::Config, Some(inner));
             }
 
-            // Check for ConfigMut<T>
             if base_name == "ConfigMut"
                 && let Some(inner) = extract_generic_inner(type_path)
             {
-                return ParamType::ConfigMut(inner);
+                return (ParamKind::ConfigMut, Some(inner));
             }
 
-            // Check for Commands
             if base_name == "Commands" {
-                return ParamType::Commands;
+                return (ParamKind::Commands, None);
             }
 
-            // Check for StandardBootServices
             if base_name == "StandardBootServices" {
-                return ParamType::StandardBootServices;
+                return (ParamKind::BootServices, None);
             }
 
-            // Check for StandardRuntimeServices
             if base_name == "StandardRuntimeServices" {
-                return ParamType::StandardRuntimeServices;
+                return (ParamKind::RuntimeServices, None);
             }
 
-            ParamType::Other
+            (ParamKind::Other, None)
         }
         Type::Reference(type_ref) => {
             if let Type::Path(type_path) = &*type_ref.elem {
                 let base_name = match get_base_type_name(&type_path.path) {
                     Some(name) => name,
-                    None => return ParamType::Other,
+                    None => return (ParamKind::Other, None),
                 };
 
-                // Check for &Storage or &mut Storage
                 if base_name == "Storage" {
                     if type_ref.mutability.is_some() {
-                        return ParamType::StorageMut;
+                        return (ParamKind::StorageMut, None);
                     } else {
-                        return ParamType::Storage;
+                        return (ParamKind::Storage, None);
                     }
                 }
             }
-            ParamType::Other
+            (ParamKind::Other, None)
         }
-        _ => ParamType::Other,
+        _ => (ParamKind::Other, None),
     }
 }
 
 /// Check for parameter conflicts and return compile error if found
 /// Checks for parameter conflicts in the function signature.
 pub(crate) fn check_param_conflicts(func: &ItemFn) -> Result<(), TokenStream> {
-    let mut params: Vec<(usize, ParamType, String, proc_macro2::Span)> = Vec::new();
+    let mut params: Vec<(usize, ParamKind, Option<String>, String, proc_macro2::Span)> = Vec::new();
 
     // Collect all parameters (skip 'self')
     for (idx, arg) in func.sig.inputs.iter().enumerate() {
         if let FnArg::Typed(pat_type) = arg {
-            let param_type = classify_param(&pat_type.ty);
+            let (kind, inner) = classify_param(&pat_type.ty);
             let param_name = match &*pat_type.pat {
                 Pat::Ident(ident) => ident.ident.to_string(),
                 _ => format!("param_{}", idx),
             };
             // Get the span of the entire parameter (pattern + type)
             let param_span = pat_type.span();
-            params.push((idx, param_type, param_name, param_span));
+            params.push((idx, kind, inner, param_name, param_span));
         }
     }
 
     // Check for conflicts
     for i in 0..params.len() {
         for j in (i + 1)..params.len() {
-            let Some((idx1, type1, name1, span1)) = params.get(i) else { continue };
-            let Some((idx2, type2, name2, span2)) = params.get(j) else { continue };
+            let Some((idx1, kind1, inner1, name1, span1)) = params.get(i) else { continue };
+            let Some((idx2, kind2, inner2, name2, span2)) = params.get(j) else { continue };
 
-            if let Some(conflict_msg) = type1.conflicts_with(type2) {
-                // Build a detailed error message with parameter information
-                // For ConfigMut conflicts, include the concrete type in the message
-                let detailed_conflict_msg = match (type1, type2) {
-                    (ParamType::ConfigMut(t1), ParamType::ConfigMut(_)) => {
-                        format!("Each ConfigMut<{}> type can only appear once in a component's entry point.", t1)
-                    }
-                    (ParamType::Config(t1), ParamType::ConfigMut(_))
-                    | (ParamType::ConfigMut(t1), ParamType::Config(_)) => {
-                        format!("You cannot have both Config<{}> and ConfigMut<{}> for the same type.", t1, t1)
-                    }
-                    _ => conflict_msg.to_string(),
-                };
+            let same_resource = inner1.is_some() && inner1 == inner2;
+            let ty = inner1.as_deref().or(inner2.as_deref());
 
+            if let Some(conflict_msg) = conflict(*kind1, *kind2, same_resource, ty) {
                 let error_msg = format!(
                     "Patina component parameter conflict detected: parameter '{}' (position {}) conflicts with parameter '{}' (position {}). {}",
-                    name2, idx2, name1, idx1, detailed_conflict_msg
+                    name2, idx2, name1, idx1, conflict_msg
                 );
 
                 // Create the primary error at the second parameter location
                 let mut error = syn::Error::new(*span2, error_msg);
 
-                // Add a note pointing to the first conflicting parameter
-                // Use "first..." for duplicate parameters, "conflicts with..." for incompatible types
-                let note_msg = match (type1, type2) {
-                    (ParamType::ConfigMut(_), ParamType::ConfigMut(_))
-                    | (ParamType::Commands, ParamType::Commands)
-                    | (ParamType::StandardBootServices, ParamType::StandardBootServices)
-                    | (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
-                        format!("first '{}' parameter here", name1)
-                    }
-                    _ => format!("conflicts with '{}' parameter here", name1),
+                // Point at the first parameter. Use "first..." for duplicates of the same kind,
+                // "conflicts with..." for incompatible kinds.
+                let note_msg = if kind1 == kind2 {
+                    format!("first '{}' parameter here", name1)
+                } else {
+                    format!("conflicts with '{}' parameter here", name1)
                 };
                 error.combine(syn::Error::new(*span1, note_msg));
 
