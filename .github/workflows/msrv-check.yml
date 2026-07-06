@@ -24,7 +24,7 @@ on:
     - cron: '0 8 * * *'
   workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [msrv_workflow_skip_app_token_fork_prs_test]
     paths:
       - 'rust-toolchain.toml'
 
@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   msrv:
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MsrvCheck.yml@main
+    uses: makubacki/patina-devops/.github/workflows/MsrvCheck.yml@msrv_workflow_skip_app_token_fork_prs
     with:
       build-tasks: build-x64,build-aarch64
     secrets: inherit
