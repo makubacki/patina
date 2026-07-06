@@ -10,6 +10,7 @@ targets = ["x86_64-unknown-uefi", "aarch64-unknown-uefi"]
 components = ["rust-src", "clippy", "rustfmt", "rust-docs"]
 
 # A custom section for CI pipelines to install tools
+# Test change to rust-toolchain.toml
 [tools]
 cargo-deny = "^0.18"
 cargo-geiger = "0.13.0"
