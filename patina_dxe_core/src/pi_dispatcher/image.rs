@@ -22,10 +22,6 @@ use patina::{
     efi_types::EfiMemoryType,
     error::EfiError,
     guids, log_debug_assert,
-    performance::{
-        logging::{perf_image_start_begin, perf_image_start_end, perf_load_image_begin, perf_load_image_end},
-        measurement::create_performance_measurement,
-    },
     pi::{
         self,
         fw_fs::FfsSectionRawType::PE32,
@@ -709,7 +705,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
         file_path: Option<NonNull<Protocol>>,
         image: Option<&[u8]>,
     ) -> Result<efi::Handle, ImageStatus> {
-        perf_load_image_begin(core::ptr::null_mut(), create_performance_measurement);
+        self.performance.map_or_default(|perf| perf.perf_load_image_begin(core::ptr::null_mut()));
 
         if image.is_none() && file_path.is_none() {
             log::error!("failed to load image: both source buffer and device path are null.");
@@ -793,7 +789,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
             private_info.image_info.image_size as usize,
         );
 
-        perf_load_image_end(handle, create_performance_measurement);
+        self.performance.map_or_default(|perf| perf.perf_load_image_end(handle));
 
         match security_status {
             Err(EfiError::SecurityViolation) => Err(ImageStatus::SecurityViolation(handle)),
@@ -873,7 +869,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
         // allocate a buffer for the entry point stack.
         let stack = ImageStack::new(ENTRY_POINT_STACK_SIZE)?;
 
-        perf_image_start_begin(image_handle, create_performance_measurement);
+        self.performance.map_or_default(|perf| perf.perf_image_start_begin(image_handle));
 
         // define a co-routine that wraps the entry point execution. this doesn't
         // run until the coroutine.resume() call below.
@@ -943,7 +939,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
 
         self.image_data.lock().current_running_image = previous_image;
 
-        perf_image_start_end(image_handle, create_performance_measurement);
+        self.performance.map_or_default(|perf| perf.perf_image_start_end(image_handle));
 
         match status {
             efi::Status::SUCCESS => Ok(()),
