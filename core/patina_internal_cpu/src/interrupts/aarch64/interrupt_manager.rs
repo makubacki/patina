@@ -8,15 +8,14 @@
 //!
 
 use patina::{
-    base::error::EfiError,
-    base::{UEFI_PAGE_MASK, UEFI_PAGE_SIZE},
+    arch::{disable_interrupts, enable_interrupts},
+    base::{UEFI_PAGE_MASK, UEFI_PAGE_SIZE, error::EfiError},
     bit,
 };
 use patina_paging::PageTable;
 
 use crate::interrupts::{
     EfiExceptionInfoDump, EfiSystemContext, HandlerType, InterruptManager, aarch64::ExceptionContextAArch64,
-    disable_interrupts, enable_interrupts,
 };
 
 cfg_if::cfg_if! {
@@ -63,7 +62,7 @@ impl InterruptsAarch64 {
 
 impl InterruptManager for InterruptsAarch64 {}
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 fn enable_fiq() {
     cfg_if::cfg_if! {
         if #[cfg(not(test))]  {
@@ -74,7 +73,7 @@ fn enable_fiq() {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 fn disable_fiq() {
     cfg_if::cfg_if! {
         if #[cfg(not(test))]  {
@@ -85,7 +84,7 @@ fn disable_fiq() {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 fn get_fiq_state() -> Result<bool, EfiError> {
     cfg_if::cfg_if! {
         if #[cfg(not(test))]  {
@@ -97,7 +96,7 @@ fn get_fiq_state() -> Result<bool, EfiError> {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 fn enable_async_abort() {
     cfg_if::cfg_if! {
         if #[cfg(not(test))]  {
@@ -108,7 +107,7 @@ fn enable_async_abort() {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 fn initialize_exception() -> Result<(), EfiError> {
     // Set the stack pointer for EL0 to be used for synchronous exceptions
     #[cfg(not(test))]

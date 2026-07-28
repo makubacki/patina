@@ -13,9 +13,12 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 
+extern crate alloc;
+
 use core::ffi::c_char;
 
-use patina::{base::protocol::ProtocolInterface, uefi::tpl_mutex::TplMutex};
+use alloc::string::ToString;
+use patina::{Char8Str, base::protocol::ProtocolInterface, uefi::tpl_mutex::TplMutex};
 use r_efi::efi;
 
 use crate::service::{SMBIOS_HANDLE_PI_RESERVED, SmbiosHandle, SmbiosTableHeader, SmbiosType};
@@ -85,7 +88,7 @@ impl SmbiosProtocolInternal {
     ///
     /// This constructor is tested via integration (Q35 platform component)
     /// as it requires 'static boot services which cannot be mocked in unit tests.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub(super) fn new(
         major_version: u8,
         minor_version: u8,
@@ -103,7 +106,7 @@ impl SmbiosProtocol {
     ///
     /// This function is only safe to call from the C UEFI protocol layer where the
     /// caller guarantees that `record` points to a complete, valid SMBIOS record.
-    #[cfg_attr(coverage_nightly, coverage(off))] // FFI function - tested via integration tests
+    #[cfg_attr(coverage, coverage(off))] // FFI function - tested via integration tests
     extern "efiapi" fn add_ext(
         protocol: *const SmbiosProtocol,
         producer_handle: efi::Handle,
@@ -199,7 +202,7 @@ impl SmbiosProtocol {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // FFI function - tested via integration tests
+    #[cfg_attr(coverage, coverage(off))] // FFI function - tested via integration tests
     extern "efiapi" fn update_string_ext(
         protocol: *const SmbiosProtocol,
         smbios_handle: *mut SmbiosHandle,
@@ -226,17 +229,13 @@ impl SmbiosProtocol {
             let handle = smbios_handle.read_unaligned();
             let str_num = string_number.read_unaligned();
 
-            // Convert C string to Rust str
-            let c_str = core::ffi::CStr::from_ptr(string);
-            let rust_str = match c_str.to_str() {
-                Ok(s) => s,
-                Err(_) => return efi::Status::INVALID_PARAMETER,
-            };
+            // `string` is a NUL-terminated CHAR8 string, per the SMBIOS Protocol's `UpdateString()` interface.
+            let rust_str = Char8Str::from_ptr(string.cast()).to_string();
 
             (handle, str_num, rust_str)
         };
 
-        match manager.update_string(handle, str_num, rust_str) {
+        match manager.update_string(handle, str_num, &rust_str) {
             Ok(()) => {
                 if manager.republish_table().is_err() {
                     log::error!("[SMBIOS UpdateString] Failed to rebuild table");
@@ -249,7 +248,7 @@ impl SmbiosProtocol {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // FFI function - tested via integration tests
+    #[cfg_attr(coverage, coverage(off))] // FFI function - tested via integration tests
     extern "efiapi" fn remove_ext(protocol: *const SmbiosProtocol, smbios_handle: SmbiosHandle) -> efi::Status {
         // Safety check: validate protocol pointer before dereferencing
         if protocol.is_null() {
@@ -279,7 +278,7 @@ impl SmbiosProtocol {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // FFI function - tested via integration tests
+    #[cfg_attr(coverage, coverage(off))] // FFI function - tested via integration tests
     extern "efiapi" fn get_next_ext(
         protocol: *const SmbiosProtocol,
         smbios_handle: *mut SmbiosHandle,

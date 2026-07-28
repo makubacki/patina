@@ -62,7 +62,7 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 #![feature(c_variadic)]
 #![feature(allocator_api)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 extern crate alloc;
 
@@ -105,10 +105,10 @@ use spin::Once;
 
 #[cfg(test)]
 #[macro_use]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 pub mod test_support;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod core_patina_tests;
 
 use core::{
@@ -117,7 +117,7 @@ use core::{
     ptr::{self, NonNull},
 };
 
-use cpu::{DxeCpu, DxeInterruptManager};
+use cpu::DxeInterruptManager;
 use gcd::SpinLockedGcd;
 use memory_manager::CoreMemoryManager;
 use patina::{
@@ -323,7 +323,7 @@ pub struct Core<P: PlatformInfo> {
     pi_dispatcher: PiDispatcher<P>,
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 impl<P: PlatformInfo> Core<P> {
     /// Creates a new instance of the DXE Core in the NoAlloc phase.
     pub const fn new(section_extractor: P::Extractor) -> Self {
@@ -416,8 +416,7 @@ impl<P: PlatformInfo> Core<P> {
 
         GCD.prioritize_32_bit_memory(P::MemoryInfo::prioritize_32_bit_memory());
 
-        let (cpu, mut interrupt_manager) =
-            cpu::initialize_cpu_subsystem().expect("Failed to initialize CPU subsystem!");
+        let mut interrupt_manager = cpu::initialize_cpu_subsystem().expect("Failed to initialize CPU subsystem!");
 
         // For early debugging, the "no_alloc" feature must be enabled in the debugger crate.
         // patina_debugger::initialize(&mut interrupt_manager);
@@ -479,7 +478,6 @@ impl<P: PlatformInfo> Core<P> {
         log::info!("GCD - After memory init:\n{GCD}");
 
         let mut component_dispatcher = self.component_dispatcher.lock();
-        component_dispatcher.add_service(DxeCpu(cpu));
         component_dispatcher.add_service(DxeInterruptManager(interrupt_manager));
         component_dispatcher.add_service(CoreMemoryManager);
         component_dispatcher.add_service(dxe_dispatch_service::CoreDxeDispatch::new(self));
@@ -719,7 +717,7 @@ fn call_bds() -> ! {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use crate::test_support::with_global_lock;
 

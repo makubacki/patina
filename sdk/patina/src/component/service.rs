@@ -417,7 +417,7 @@ unsafe impl<T: ?Sized + 'static> Param for Service<T> {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::{IntoService, *};
 

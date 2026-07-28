@@ -651,7 +651,7 @@ const fn char_to_val(c: char) -> u8 {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::standard::efi as r_efi_base;

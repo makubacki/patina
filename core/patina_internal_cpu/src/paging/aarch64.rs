@@ -10,10 +10,7 @@
 //!
 use patina_paging::{MemoryAttributes, PageTable, PagingType, PtError, aarch64::AArch64PageTable};
 
-use crate::{
-    cpu::aarch64::flush_data_cache_range,
-    paging::{CacheAttributeValue, PatinaPageTable},
-};
+use crate::paging::{CacheAttributeValue, PatinaPageTable};
 use patina::pi::protocol::cpu_arch::CpuFlushType;
 use patina_paging::page_allocator::PageAllocator;
 use r_efi::efi;
@@ -72,13 +69,13 @@ where
         // clean and invalidate the data cache for the range so that any dirty lines
         // are written back to memory before subsequent accesses bypass the cache.
         if old_cache_attributes.intersects(CACHED_ATTRS) && new_cache_attributes.intersects(UNCACHED_ATTRS) {
-            flush_data_cache_range(address, size, CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate);
+            let _ = patina::arch::flush_data_cache(address, size, CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate);
         }
     }
 }
 
 /// Create an AArch64 paging instance under the general PatinaPageTable trait.
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 pub fn create_cpu_aarch64_paging<A: PageAllocator + 'static>(
     page_allocator: A,
 ) -> Result<impl PatinaPageTable, efi::Status> {
@@ -89,7 +86,7 @@ pub fn create_cpu_aarch64_paging<A: PageAllocator + 'static>(
 ///
 /// ## Safety
 /// The caller must ensure no other entity is concurrently modifying the page tables.
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 pub unsafe fn open_active_cpu_aarch64_paging<A: PageAllocator + 'static>(
     page_allocator: A,
 ) -> Result<impl PatinaPageTable, PtError> {
@@ -99,7 +96,7 @@ pub unsafe fn open_active_cpu_aarch64_paging<A: PageAllocator + 'static>(
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
 
     use super::*;

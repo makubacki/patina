@@ -151,42 +151,42 @@ impl ComponentDispatcher {
     }
 
     /// Adds a service to storage.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn add_service<S: IntoService + 'static>(&mut self, service: S) {
         self.storage.add_service(service);
     }
 
     /// Gets a service from storage.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn get_service<S: IntoService + 'static>(&mut self) -> Option<patina::component::service::Service<S>> {
         self.storage.get_service::<S>()
     }
 
     /// Locks the configurations in storage, preventing further modifications.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn lock_configs(&mut self) {
         self.storage.lock_configs();
     }
 
     /// Sets the Boot Services table in storage.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn set_boot_services(&mut self, bs: StandardBootServices) {
         self.storage.set_boot_services(bs);
     }
 
     /// Sets the Runtime Services table in storage.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn set_runtime_services(&mut self, rs: StandardRuntimeServices) {
         self.storage.set_runtime_services(rs);
     }
 
     /// Sets the core Image Handle in storage.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     #[inline(always)]
     pub(crate) fn set_image_handle(&mut self, handle: efi::Handle) {
         self.storage.set_image_handle(handle);
@@ -242,7 +242,7 @@ impl ComponentDispatcher {
     }
 
     /// Logs all components that were not dispatched, and the parameter that was not satisfied that prevented dispatch.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub(crate) fn display_not_dispatched(&self) {
         if !self.components.is_empty() || !self.rejected.is_empty() {
             let name_len = "name".len();
@@ -275,7 +275,7 @@ impl ComponentDispatcher {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use patina::{component::component, pi::hob::GuidHob};
 

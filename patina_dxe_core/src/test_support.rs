@@ -265,7 +265,37 @@ impl PatinaPageTable for MockPageTableWrapper {
 /// All tests should run from inside this.
 pub(crate) fn with_global_lock<F: Fn() + std::panic::RefUnwindSafe>(f: F) -> Result<(), Box<dyn Any + Send>> {
     let _guard = GLOBAL_STATE_TEST_LOCK.lock().unwrap();
-    std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(|| {
+        f();
+    });
+
+    // Some tests exercise code paths that disable CPU interrupts (e.g. the CPU arch protocol or
+    // TPL handling). On host test builds the SDK arch tracks interrupt state in a process-global
+    // static shared by every test in this binary, so a test that leaves interrupts disabled would
+    // pollute later tests. Restore interrupts to enabled here (runs even if `f` panicked, since the
+    // panic was caught above) so the state never leaks across tests.
+    patina::arch::enable_interrupts();
+
+    result
+}
+
+/// Like [`with_global_lock`], but additionally resets the shared global state via
+/// [`reset_global_state`] both before running `f` (so the test starts from a clean slate
+/// regardless of what a prior test left behind) and after `f` returns or panics (so nothing
+/// leaks to the next test).
+///
+/// This is the preferred entry point for tests that mutate the global GCD, protocol database, or
+/// allocators as it makes correct cleanup automatic.
+///
+/// Tests that also mutate *other* global state (for example the system table pointer or a
+/// per-module static) should register an additional [`StateGuard`] inside the closure to reset
+/// that state or use [`with_global_lock`] directly, since [`reset_global_state`] intentionally
+/// does not touch subsystem-specific state.
+pub(crate) fn with_clean_global_lock<F: Fn() + std::panic::RefUnwindSafe>(f: F) -> Result<(), Box<dyn Any + Send>> {
+    with_global_lock(|| {
+        // Reset on exit (even if `f` panics), and up front, so the test both starts and ends clean.
+        let _guard = StateGuard::new(reset_global_state);
+        reset_global_state();
         f();
     })
 }
@@ -333,6 +363,29 @@ pub(crate) unsafe fn init_test_gcd(size: Option<usize>) {
 pub(crate) unsafe fn reset_allocators() {
     // SAFETY: Test code - resetting the global allocator state with the test lock held.
     unsafe { crate::allocator::reset_allocators() }
+}
+
+/// Resets the shared global state that tests mutate: the [`GCD`], the protocol database
+/// (`PROTOCOL_DB`), and the allocators to a clean, uninitialized state.
+///
+/// Every reset performed here is idempotent and independent of whether the corresponding subsystem
+/// was initialized, and no test relies on inheriting any of this state (each consumer re-initializes
+/// what it needs on entry). It is recommended to register it in a [`StateGuard`] before test setup
+/// so that cleanup runs even if setup panics.
+///
+/// This intentionally does not reset subsystem-specific state (for example the system table or
+/// per-module statics) so it is more broadly applicable.
+///
+/// ## Locking
+/// Must be called with the global test lock held (see [`with_global_lock`]). It does not acquire
+/// the lock itself.
+pub(crate) fn reset_global_state() {
+    // SAFETY: Callers hold the global test lock, so no other test can access the state concurrently.
+    unsafe {
+        GCD.reset();
+        PROTOCOL_DB.reset();
+        reset_allocators();
+    }
 }
 
 /// Reset and re-initialize the protocol database to default empty state.
@@ -691,7 +744,7 @@ pub(crate) fn init_test_logger() {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::{

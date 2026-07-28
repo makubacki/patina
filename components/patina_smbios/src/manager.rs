@@ -21,7 +21,7 @@ mod protocol;
 mod record;
 
 // Re-export main types and functions
-pub use core::{SMBIOS_3_X_TABLE_GUID, SmbiosManager};
+pub use core::SmbiosManager;
 pub(crate) use record::SmbiosRecord;
 
 use alloc::boxed::Box;
@@ -47,7 +47,7 @@ use self::protocol::{SmbiosProtocol, SmbiosProtocolInternal};
 ///
 /// Returns the protocol handle on success. The caller is responsible for managing the
 /// protocol lifetime (though in practice, UEFI protocols persist for the system lifetime).
-#[cfg_attr(coverage_nightly, coverage(off))] // Protocol installation - tested via integration tests
+#[cfg_attr(coverage, coverage(off))] // Protocol installation - tested via integration tests
 pub fn install_smbios_protocol(
     major_version: u8,
     minor_version: u8,

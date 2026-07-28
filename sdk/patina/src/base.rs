@@ -18,6 +18,7 @@ pub mod error;
 pub mod guid;
 pub mod hash;
 pub mod protocol;
+pub mod string;
 
 /// EFI memory allocation functions work in units of EFI_PAGEs that are 4KB.
 /// This should in no way be confused with the page size of the processor.
@@ -491,7 +492,7 @@ macro_rules! writelncrlf {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
 

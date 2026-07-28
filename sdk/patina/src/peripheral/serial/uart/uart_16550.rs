@@ -87,7 +87,7 @@ impl crate::peripheral::serial::SerialIO for Uart16550 {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::peripheral::serial::SerialIO;

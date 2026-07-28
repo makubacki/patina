@@ -9,16 +9,18 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 mod cpu_arch_protocol;
+mod efi_cpu;
 #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
 mod hw_interrupt_protocol;
 mod perf_timer;
 
-pub(crate) use cpu_arch_protocol::{CpuArchProtocolInstaller, DxeCpu, DxeInterruptManager};
+pub(crate) use cpu_arch_protocol::{CpuArchProtocolInstaller, DxeInterruptManager};
 #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
 pub(crate) use hw_interrupt_protocol::HwInterruptProtocolInstaller;
 pub(crate) use perf_timer::PerfTimer;
 
-use patina_internal_cpu::{cpu::EfiCpu, interrupts::Interrupts};
+use efi_cpu::EfiCpu;
+use patina_internal_cpu::interrupts::Interrupts;
 
 /// A configuration struct containing the GIC bases (gic_d, gic_r) for AARCH64 systems.
 ///
@@ -73,7 +75,7 @@ impl GicBases {
     /// Access to these registers are exclusive to this GicBases instance.
     ///
     /// Caller must guarantee that access to these registers is exclusive to this GicBases instance.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub unsafe fn new(gicd_base: u64, gicr_base: u64) -> Self {
         GicBases { gicd: gicd_base, gicr: gicr_base }
     }
@@ -113,8 +115,8 @@ pub trait CpuInfo {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn initialize_cpu_subsystem() -> crate::error::Result<(EfiCpu, Interrupts)> {
+#[cfg_attr(coverage, coverage(off))]
+pub fn initialize_cpu_subsystem() -> crate::error::Result<Interrupts> {
     let mut cpu = EfiCpu::default();
     cpu.initialize().inspect_err(|err| {
         log::error!("Failed to initialize CPU subsystem: {}", err);
@@ -125,11 +127,11 @@ pub fn initialize_cpu_subsystem() -> crate::error::Result<(EfiCpu, Interrupts)> 
         log::error!("Failed to initialize Interrupt Manager: {}", err);
     })?;
 
-    Ok((cpu, interrupt_manager))
+    Ok(interrupt_manager)
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
 

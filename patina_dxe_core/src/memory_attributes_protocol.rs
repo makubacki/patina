@@ -323,7 +323,7 @@ mod tests {
     use std::{cell::RefCell, ptr, rc::Rc};
 
     fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             test_support::init_test_logger();
             // SAFETY: Test code - resetting the global GCD state for test isolation.
             // The test lock is used to prevent concurrent access.

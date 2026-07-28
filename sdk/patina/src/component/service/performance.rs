@@ -191,7 +191,7 @@ pub trait PerformanceManager: Send + Sync {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use alloc::string::{String, ToString};

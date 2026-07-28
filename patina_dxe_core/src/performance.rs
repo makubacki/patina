@@ -586,7 +586,7 @@ pub(crate) fn push_generic_record(buffer: &mut PerformanceRecordBuffer, record_t
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::test_support::with_global_lock;

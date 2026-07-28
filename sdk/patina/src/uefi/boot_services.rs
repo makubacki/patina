@@ -2059,7 +2059,7 @@ impl BootServices for StandardBootServices {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use crate::BinaryGuid;
     use c_ptr::CPtr;

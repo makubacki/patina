@@ -549,7 +549,7 @@ pub fn get_section<'a>(target: &str, pe_info: &UefiPeInfo, image: &'a [u8]) -> e
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use crate::test_support;
 
@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     fn flatten_runtime_relocation_data_serializes_supported_types() {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             test_support::init_test_logger();
             // SAFETY: Initialization for testing under the global lock so the runtime services data
             // allocator can service allocations.

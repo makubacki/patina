@@ -17,12 +17,12 @@ mod section_decompress;
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
-    string::{String, ToString},
+    string::String,
     vec::Vec,
 };
 use core::{cmp::Ordering, ffi::c_void};
 use patina::{
-    BinaryGuid, OwnedGuid,
+    BinaryGuid, Char16Str, OwnedGuid,
     base::error::EfiError,
     component::service::Service,
     pi::{
@@ -258,7 +258,7 @@ impl<P: PlatformInfo> PiDispatcher<P> {
 
     /// Installs any firmware volumes from FV HOBs in the hob list
     #[inline(always)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub fn install_firmware_volumes_from_hoblist(
         &self,
         hob_list: &patina::pi::hob::HobList,
@@ -518,26 +518,26 @@ impl<P: PlatformInfo> PiDispatcher<P> {
 
     /// Schedules a driver for execution.
     #[inline(always)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub fn schedule(&self, handle: efi::Handle, file: &efi::Guid) -> Result<(), EfiError> {
         self.dispatcher_context.lock().schedule(handle, file)
     }
 
     /// Marks a driver as trusted for execution.
     #[inline(always)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub fn trust(&self, handle: efi::Handle, file: &efi::Guid) -> Result<(), EfiError> {
         self.dispatcher_context.lock().trust(handle, file)
     }
 
     #[inline(always)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     fn add_fv_handles(&self, new_handles: Vec<efi::Handle>) -> Result<(), EfiError> {
         self.dispatcher_context.lock().add_fv_handles(new_handles, &self.section_extractor)
     }
 
     #[inline(always)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     /// Caller must ensure that the base address is a valid firmware volume.
     pub unsafe fn install_firmware_volume(
         &self,
@@ -744,14 +744,14 @@ impl DispatcherContext {
                             .iter()
                             .find(|x| x.section_type() == Some(ffs::section::Type::UserInterface))
                             .and_then(|x| x.try_content_as_slice().ok())
-                            .map(|data| {
-                                let chars: Vec<u16> = data
+                            .and_then(|data| {
+                                let units: Vec<u16> = data
                                     .chunks_exact(2)
                                     .map(|c| {
                                         u16::from_le_bytes(c.try_into().expect("chunks_exact(2) guarantees length"))
                                     })
                                     .collect();
-                                String::from_utf16_lossy(&chars).trim_end_matches('\0').to_string()
+                                Char16Str::from_units_until_nul(&units).ok().map(|s| s.chars().collect())
                             });
 
                         if let Some(pe32_section) =
@@ -896,7 +896,7 @@ impl DispatcherContext {
 unsafe impl Send for DispatcherContext {}
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use core::sync::atomic::AtomicBool;
     use std::{fs::File, io::Read, vec};
@@ -938,7 +938,7 @@ mod tests {
     where
         F: Fn() + std::panic::RefUnwindSafe,
     {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             // SAFETY: Test-only initialization of the protocol database occurs under the global lock.
             unsafe { test_support::init_test_protocol_db() };
             f();

@@ -13,9 +13,7 @@ use core::{
 
 use r_efi::efi;
 
-use patina::pi::protocol::timer;
-
-use patina_internal_cpu::{cpu::EfiCpu, interrupts};
+use patina::{arch, pi::protocol::timer};
 
 use crate::{
     event_db::{SpinLockedEventDb, TimerDelay},
@@ -148,7 +146,12 @@ unsafe extern "efiapi" fn wait_for_event(
         return efi::Status::INVALID_PARAMETER;
     }
 
-    if CURRENT_TPL.load(Ordering::SeqCst) != efi::TPL_APPLICATION {
+    if CURRENT_TPL.load(Ordering::SeqCst) != efi::TPL_APPLICATION || !arch::interrupts_enabled() {
+        debug_assert!(
+            CURRENT_TPL.load(Ordering::SeqCst) != efi::TPL_APPLICATION,
+            "wait_for_event called at TPL_APPLICATION"
+        );
+        debug_assert!(!arch::interrupts_enabled(), "wait_for_event called with interrupts disabled");
         return efi::Status::UNSUPPORTED;
     }
 
@@ -177,10 +180,11 @@ unsafe extern "efiapi" fn wait_for_event(
 
         // EDK2 core signals an idle event here to notify an event group of the "idle" state. The only consumers of that
         // event are the CPU architectural drivers which use it to enter a low power state until the next interrupt.
-        // Patina implements CPU architectural support as part of the core, so directly call the sleep() method to avoid
-        // exposing the idle event to outside consumers (this event group is not specified in UEFI or PI specs). In the
-        // event that a need arises to expose the idle event to consumers outside of Patina, it can be signaled here.
-        EfiCpu::sleep();
+        // Patina implements CPU architectural support in the SDK, so directly call the enable_interrupts_and_sleep()
+        // function to avoid exposing the idle event to outside consumers (this event group is not specified in UEFI or
+        // PI specs). In the event that a need arises to expose the idle event to consumers outside of Patina, it can be
+        // signaled here.
+        arch::enable_interrupts_and_sleep();
     }
 }
 
@@ -272,7 +276,7 @@ pub extern "efiapi" fn raise_tpl(new_tpl: efi::Tpl) -> efi::Tpl {
     }
 
     if (new_tpl == efi::TPL_HIGH_LEVEL) && (prev_tpl < efi::TPL_HIGH_LEVEL) {
-        interrupts::disable_interrupts();
+        arch::disable_interrupts();
     }
     prev_tpl
 }
@@ -315,9 +319,9 @@ pub extern "efiapi" fn restore_tpl(new_tpl: efi::Tpl) {
                 break; /* no pending events */
             };
             if event.notify_tpl < efi::TPL_HIGH_LEVEL {
-                interrupts::enable_interrupts();
+                arch::enable_interrupts();
             } else {
-                interrupts::disable_interrupts();
+                arch::disable_interrupts();
             }
             CURRENT_TPL.store(event.notify_tpl, Ordering::SeqCst);
             let notify_context = event.notify_context.unwrap_or(core::ptr::null_mut());
@@ -337,7 +341,7 @@ pub extern "efiapi" fn restore_tpl(new_tpl: efi::Tpl) {
     CURRENT_TPL.store(new_tpl, Ordering::SeqCst);
 
     if new_tpl < efi::TPL_HIGH_LEVEL {
-        interrupts::enable_interrupts();
+        arch::enable_interrupts();
     }
 }
 
@@ -400,14 +404,14 @@ pub fn init_events_support(st: &mut EfiSystemTable) {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::test_support;
     use std::{ptr, sync::atomic::Ordering};
 
     fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             test_support::init_test_logger();
             // SAFETY: Test-only initialization of global services under the global lock.
             unsafe {
@@ -415,16 +419,6 @@ mod tests {
                 crate::test_support::reset_allocators();
                 crate::test_support::init_test_protocol_db();
             }
-
-            let _guard = test_support::StateGuard::new(|| {
-                // SAFETY: Cleanup code runs with global lock held, resetting
-                // global state that was initialized above.
-                unsafe {
-                    crate::GCD.reset();
-                    crate::PROTOCOL_DB.reset();
-                    crate::allocator::reset_allocators();
-                }
-            });
 
             f();
         })
@@ -1024,7 +1018,7 @@ mod tests {
             // Restore original TPL
             CURRENT_TPL.store(original_tpl, Ordering::SeqCst);
             // Re-enable interrupts if we left them disabled
-            interrupts::enable_interrupts();
+            arch::enable_interrupts();
         });
     }
 
@@ -1098,7 +1092,7 @@ mod tests {
 
             // Set known starting TPL
             CURRENT_TPL.store(efi::TPL_HIGH_LEVEL, Ordering::SeqCst);
-            interrupts::disable_interrupts();
+            arch::disable_interrupts();
 
             // Test restoring from HIGH_LEVEL to NOTIFY
             restore_tpl(efi::TPL_NOTIFY);

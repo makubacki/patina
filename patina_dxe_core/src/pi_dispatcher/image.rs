@@ -16,6 +16,7 @@ use core::{
     slice::from_raw_parts,
 };
 use patina::{
+    Char16Str,
     base::error::EfiError,
     base::guid as base_guids,
     base::{DEFAULT_CACHE_ATTR, UEFI_PAGE_SIZE, align_up},
@@ -79,7 +80,7 @@ pub const ENTRY_POINT_STACK_SIZE: usize = 0x100000;
 const _: () = assert!(STACK_ALIGNMENT < UEFI_PAGE_SIZE);
 
 // dummy function used to initialize PrivateImageData.entry_point.
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 extern "efiapi" fn unimplemented_entry_point(
     _handle: efi::Handle,
     _system_table: *mut efi::SystemTable,
@@ -814,7 +815,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
     ///   structure in readable memory for the duration of the call.
     /// - `image_handle` is null-checked and returns `INVALID_PARAMETER` if null; if non-null,
     ///   it must point to writable memory suitable for storing an `efi::Handle`.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub(super) unsafe extern "efiapi" fn load_image_efiapi(
         boot_policy: efi::Boolean,
         parent_image_handle: efi::Handle,
@@ -964,7 +965,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
     /// If `exit_data_size` and `exit_data` are non-null, they must point to
     /// valid writable memory. The caller owns the returned exit data buffer.
     ///
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub(super) unsafe extern "efiapi" fn start_image_efiapi(
         image_handle: efi::Handle,
         exit_data_size: *mut usize,
@@ -1090,7 +1091,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
         Ok(())
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     /// Unloads a previously loaded image.
     ///
     /// # Safety Considerations
@@ -1198,7 +1199,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
     /// to a valid buffer of at least `exit_data_size` bytes. This pointer is
     /// stored and later returned to the caller of `start_image` to retrieve the
     /// exit data.
-    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(coverage, coverage(off))]
     pub(super) unsafe extern "efiapi" fn exit_efiapi(
         image_handle: efi::Handle,
         status: efi::Status,
@@ -1414,7 +1415,8 @@ fn get_file_buffer_from_sfs(file_path: NonNull<Protocol>) -> Result<(Vec<u8>, ef
             efi::protocols::device_path::TYPE_END => break,
             _ => Err(EfiError::Unsupported)?,
         }
-        //For MEDIA_FILE_PATH_DP, file name is in the node data, but it needs to be converted to Vec<u16> for call to open.
+        // For MEDIA_FILE_PATH_DP, file name is in the node data, but it needs to be converted to u16 code units for
+        // the call to open, since the raw device path bytes are not guaranteed to be aligned.
         let filename: Vec<u16> = node
             .data()
             .chunks_exact(2)
@@ -1426,8 +1428,9 @@ fn get_file_buffer_from_sfs(file_path: NonNull<Protocol>) -> Result<(Vec<u8>, ef
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let filename = Char16Str::from_units_until_nul(&filename)?;
 
-        file = file.open(filename, efi::protocols::file::MODE_READ, 0)?;
+        file = file.open(filename.as_units_with_nul().to_vec(), efi::protocols::file::MODE_READ, 0)?;
     }
 
     // if execution comes here, the above loop was successfully able to open all the files on the remaining device path,
@@ -1592,7 +1595,7 @@ impl Buffer {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     extern crate std;
     use super::*;
@@ -1650,17 +1653,10 @@ mod tests {
 
     fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
         // SAFETY: Test code only - initializing test infrastructure within the global test lock.
-        test_support::with_global_lock(|| unsafe {
+        test_support::with_clean_global_lock(|| unsafe {
             test_support::init_test_gcd(None);
             test_support::init_test_protocol_db();
             init_system_table();
-
-            let _guard = test_support::StateGuard::new(|| {
-                // SAFETY: Cleanup code runs with global lock held, resetting
-                // global state that was initialized above.
-                crate::GCD.reset();
-                crate::PROTOCOL_DB.reset();
-            });
 
             f();
         })

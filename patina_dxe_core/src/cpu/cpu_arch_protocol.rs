@@ -12,6 +12,7 @@ use crate::{dxe_services, protocols::PROTOCOL_DB};
 use alloc::boxed::Box;
 use core::ffi::c_void;
 use patina::{
+    arch,
     base::error::{EfiError, Result},
     base::protocol::ProtocolInterface,
     component::{
@@ -20,35 +21,16 @@ use patina::{
     },
     uefi::boot_services::{BootServices, StandardBootServices},
 };
-use patina_internal_cpu::{
-    cpu::{Cpu, EfiCpu},
-    interrupts::{self, ExceptionType, HandlerType, InterruptManager, Interrupts},
-};
+use patina_internal_cpu::interrupts::{self, ExceptionType, HandlerType, InterruptManager, Interrupts};
 use r_efi::efi;
+
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use patina::pi::protocol::cpu_arch::{CpuArchProtocol, CpuFlushType, CpuInitType, InterruptHandler, PROTOCOL_GUID};
 
-#[derive(IntoService)]
-#[service(dyn Cpu)]
-pub(crate) struct DxeCpu(pub(crate) EfiCpu);
-
-impl Cpu for DxeCpu {
-    fn flush_data_cache(&self, start: efi::PhysicalAddress, length: u64, flush_type: CpuFlushType) -> Result<()> {
-        self.0.flush_data_cache(start, length, flush_type)
-    }
-
-    fn init(&self, init_type: CpuInitType) -> Result<()> {
-        self.0.init(init_type)
-    }
-
-    fn get_timer_value(&self, timer_index: u32) -> Result<(u64, u64)> {
-        self.0.get_timer_value(timer_index)
-    }
-
-    fn cache_writeback_granule(&self) -> u32 {
-        self.0.cache_writeback_granule()
-    }
-}
+/// Cached CPU timer period. A value of zero indicates the period has not yet been queried from the
+/// architecture layer.
+static TIMER_PERIOD: AtomicU64 = AtomicU64::new(0);
 
 #[derive(IntoService)]
 #[service(dyn InterruptManager)]
@@ -69,7 +51,6 @@ struct EfiCpuArchProtocolImpl {
     protocol: CpuArchProtocol,
 
     // Crate accessible fields
-    pub(crate) cpu: Service<dyn Cpu>,
     pub(crate) interrupt_manager: Service<dyn InterruptManager>,
 }
 
@@ -103,30 +84,30 @@ fn get_impl_ref_mut<'a>(this: *mut CpuArchProtocol) -> Option<&'a mut EfiCpuArch
 }
 
 // EfiCpuArchProtocolImpl function pointers implementations.
-
+#[cfg_attr(coverage, coverage(off))]
 extern "efiapi" fn flush_data_cache(
     this: *const CpuArchProtocol,
     start: efi::PhysicalAddress,
     length: u64,
     flush_type: CpuFlushType,
 ) -> efi::Status {
-    let Some(impl_ref) = get_impl_ref(this) else {
+    if this.is_null() {
         return efi::Status::INVALID_PARAMETER;
-    };
+    }
 
-    let result = impl_ref.cpu.flush_data_cache(start, length, flush_type);
-
-    result.map(|_| efi::Status::SUCCESS).unwrap_or_else(|err| err.into())
+    patina::arch::flush_data_cache(start, length, flush_type)
+        .map(|_| efi::Status::SUCCESS)
+        .unwrap_or_else(|err| err.into())
 }
 
 extern "efiapi" fn enable_interrupt(this: *const CpuArchProtocol) -> efi::Status {
-    interrupts::enable_interrupts();
+    arch::enable_interrupts();
 
     efi::Status::SUCCESS
 }
 
 extern "efiapi" fn disable_interrupt(this: *const CpuArchProtocol) -> efi::Status {
-    interrupts::disable_interrupts();
+    arch::disable_interrupts();
 
     efi::Status::SUCCESS
 }
@@ -135,25 +116,19 @@ extern "efiapi" fn get_interrupt_state(this: *const CpuArchProtocol, state: *mut
     if state.is_null() {
         return efi::Status::INVALID_PARAMETER;
     }
-    interrupts::get_interrupt_state()
-        .map(|interrupt_state| {
-            // SAFETY: caller must ensure that state is a valid pointer. It is null-checked above.
-            unsafe {
-                state.write_unaligned(interrupt_state);
-            }
-            efi::Status::SUCCESS
-        })
-        .unwrap_or_else(|err| err.into())
+    // SAFETY: caller must ensure that state is a valid pointer. It is null-checked above.
+    unsafe {
+        state.write_unaligned(arch::interrupts_enabled());
+    }
+    efi::Status::SUCCESS
 }
 
 extern "efiapi" fn init(this: *const CpuArchProtocol, init_type: CpuInitType) -> efi::Status {
-    let Some(impl_ref) = get_impl_ref(this) else {
+    if this.is_null() {
         return efi::Status::INVALID_PARAMETER;
-    };
+    }
 
-    let result = impl_ref.cpu.init(init_type);
-
-    result.map(|_| efi::Status::SUCCESS).unwrap_or_else(|err| err.into())
+    efi::Status::UNSUPPORTED
 }
 
 extern "efiapi" fn register_interrupt_handler(
@@ -180,6 +155,35 @@ extern "efiapi" fn register_interrupt_handler(
     }
 }
 
+/// Returns the current CPU timer counter value along with its period.
+///
+/// The timer period, in units of 100 nanoseconds per tick, is derived from the counter frequency
+/// and cached after it is first computed. The architecture (SDK) layer is only consulted for the
+/// frequency while the cache remains unfilled; once populated, the cached value is reused.
+fn get_cpu_timer_value(timer_index: u32) -> Result<(u64, u64)> {
+    if timer_index != 0 {
+        return Err(EfiError::InvalidParameter);
+    }
+
+    let value = patina::arch::get_timer_value();
+
+    let cached = TIMER_PERIOD.load(Ordering::Relaxed);
+    if cached != 0 {
+        // The period is already known; reuse the cached value without querying the arch layer.
+        return Ok((value, cached));
+    }
+
+    // The timer period is the number of 100 ns units that elapse per counter tick, computed from
+    // the counter frequency in Hz (100 ns units per tick = 10^7 / frequency). If the frequency
+    // cannot be determined, the period is reported as zero.
+    let period = match patina::arch::get_timer_frequency() {
+        Some(frequency) => 10_000_000 / frequency.get(),
+        None => 0,
+    };
+    TIMER_PERIOD.store(period, Ordering::Relaxed);
+    Ok((value, period))
+}
+
 extern "efiapi" fn get_timer_value(
     this: *const CpuArchProtocol,
     timer_index: u32,
@@ -189,11 +193,11 @@ extern "efiapi" fn get_timer_value(
     if timer_value.is_null() || timer_period.is_null() {
         return efi::Status::INVALID_PARAMETER;
     }
-    let Some(impl_ref) = get_impl_ref(this) else {
+    if this.is_null() {
         return efi::Status::INVALID_PARAMETER;
-    };
+    }
 
-    let result = impl_ref.cpu.get_timer_value(timer_index);
+    let result = get_cpu_timer_value(timer_index);
 
     match result {
         Ok((value, period)) => {
@@ -221,7 +225,7 @@ extern "efiapi" fn set_memory_attributes(
 }
 
 impl EfiCpuArchProtocolImpl {
-    fn new(cpu: Service<dyn Cpu>, interrupt_manager: Service<dyn InterruptManager>) -> Self {
+    fn new(interrupt_manager: Service<dyn InterruptManager>) -> Self {
         Self {
             protocol: CpuArchProtocol {
                 flush_data_cache,
@@ -233,11 +237,10 @@ impl EfiCpuArchProtocolImpl {
                 get_timer_value,
                 set_memory_attributes,
                 number_of_timers: 0,
-                dma_buffer_alignment: cpu.cache_writeback_granule(),
+                dma_buffer_alignment: patina::arch::cache_writeback_granule(),
             },
 
             // private data
-            cpu,
             interrupt_manager,
         }
     }
@@ -249,13 +252,8 @@ pub(crate) struct CpuArchProtocolInstaller;
 
 #[component]
 impl CpuArchProtocolInstaller {
-    fn entry_point(
-        self,
-        cpu: Service<dyn Cpu>,
-        interrupt_manager: Service<dyn InterruptManager>,
-        bs: StandardBootServices,
-    ) -> Result<()> {
-        let protocol = EfiCpuArchProtocolImpl::new(cpu, interrupt_manager);
+    fn entry_point(self, interrupt_manager: Service<dyn InterruptManager>, bs: StandardBootServices) -> Result<()> {
+        let protocol = EfiCpuArchProtocolImpl::new(interrupt_manager);
 
         // Convert the protocol to a raw pointer and store it in to protocol DB
         let interface = Box::leak(Box::new(protocol));
@@ -269,7 +267,7 @@ impl CpuArchProtocolInstaller {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use crate::test_support;
 
@@ -277,21 +275,6 @@ mod tests {
 
     use mockall::{mock, predicate::*};
     use patina::pi::protocol::cpu_arch::{EfiExceptionType, EfiSystemContext};
-
-    mock! {
-        EfiCpuInit {}
-        impl Cpu for EfiCpuInit {
-            fn flush_data_cache(
-                &self,
-                start: efi::PhysicalAddress,
-                length: u64,
-                flush_type: CpuFlushType,
-            ) -> Result<()>;
-            fn init(&self, init_type: CpuInitType) -> Result<()>;
-            fn get_timer_value(&self, timer_index: u32) -> Result<(u64, u64)>;
-            fn cache_writeback_granule(&self) -> u32;
-        }
-    }
 
     mock! {
         InterruptManager {}
@@ -314,34 +297,10 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_data_cache() {
-        with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            cpu_init.expect_flush_data_cache().with(eq(0), eq(0), always()).returning(|_, _, _| Ok(()));
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
-
-            let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
-
-            let status = flush_data_cache(&protocol.protocol, 0, 0, CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate);
-            assert_eq!(status, efi::Status::SUCCESS);
-
-            // Verify the case when `this` is null.
-            let status = flush_data_cache(core::ptr::null(), 0, 0, CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate);
-            assert_eq!(status, efi::Status::INVALID_PARAMETER);
-        });
-    }
-
-    #[test]
     fn test_enable_interrupt() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let status = enable_interrupt(&protocol.protocol);
             assert_eq!(status, efi::Status::SUCCESS);
@@ -351,11 +310,8 @@ mod tests {
     #[test]
     fn test_disable_interrupt() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let status = disable_interrupt(&protocol.protocol);
             assert_eq!(status, efi::Status::SUCCESS);
@@ -365,36 +321,12 @@ mod tests {
     #[test]
     fn test_get_interrupt_state() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let mut state = false;
             let status = get_interrupt_state(&protocol.protocol, &mut state as *mut bool);
             assert_eq!(status, efi::Status::SUCCESS);
-        });
-    }
-
-    #[test]
-    fn test_init() {
-        with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_init().with(always()).returning(|_| Ok(()));
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
-
-            let mut im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
-
-            let status = init(&protocol.protocol, CpuInitType::EfiCpuInit);
-            assert_eq!(status, efi::Status::SUCCESS);
-
-            // Verify the case when `this` is null.
-            let status = init(core::ptr::null(), CpuInitType::EfiCpuInit);
-            assert_eq!(status, efi::Status::INVALID_PARAMETER);
         });
     }
 
@@ -403,10 +335,6 @@ mod tests {
     #[test]
     fn test_register_interrupt_handler() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
-
             let mut interrupt_manager = MockInterruptManager::new();
             interrupt_manager
                 .expect_register_exception_handler()
@@ -414,7 +342,7 @@ mod tests {
                 .returning(|_, _| Ok(()));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(interrupt_manager));
 
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let status = register_interrupt_handler(&protocol.protocol, 0, mock_interrupt_handler);
             assert_eq!(status, efi::Status::SUCCESS);
@@ -428,14 +356,9 @@ mod tests {
     #[test]
     fn test_get_timer_value() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            cpu_init.expect_get_timer_value().with(eq(0)).returning(|_| Ok((0, 0)));
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
-
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
 
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let mut timer_value: u64 = 0;
             let mut timer_period: u64 = 0;
@@ -455,40 +378,26 @@ mod tests {
         });
     }
 
-    // Tests for DxeCpu delegation
     #[test]
-    fn test_dxe_cpu_flush_data_cache_delegates() {
+    fn test_get_cpu_timer_value() {
         with_locked_state(|| {
-            let dxe_cpu = DxeCpu(EfiCpu::default());
-            let result = dxe_cpu.flush_data_cache(0x1000, 0x100, CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate);
-            assert!(result.is_ok());
-        });
-    }
+            // Start from a clean cache so the frequency-derived path is exercised first.
+            TIMER_PERIOD.store(0, Ordering::Relaxed);
 
-    #[test]
-    fn test_dxe_cpu_init_delegates() {
-        with_locked_state(|| {
-            let dxe_cpu = DxeCpu(EfiCpu::default());
-            let result = dxe_cpu.init(CpuInitType::EfiCpuInit);
-            assert!(result.is_ok());
-        });
-    }
+            // A non-zero timer index is rejected.
+            assert!(matches!(get_cpu_timer_value(1), Err(EfiError::InvalidParameter)));
 
-    #[test]
-    fn test_dxe_cpu_get_timer_value_delegates() {
-        with_locked_state(|| {
-            let dxe_cpu = DxeCpu(EfiCpu::default());
-            let result = dxe_cpu.get_timer_value(0);
-            assert_eq!(result.unwrap(), (0, 0));
-        });
-    }
+            // With no cached period and the host stub arch reporting no frequency, the period is 0
+            // and the counter value is the stub's 0.
+            assert_eq!(get_cpu_timer_value(0).unwrap(), (0, 0));
 
-    #[test]
-    fn test_dxe_cpu_cache_writeback_granule_delegates() {
-        with_locked_state(|| {
-            let dxe_cpu = DxeCpu(EfiCpu::default());
-            let granule = dxe_cpu.cache_writeback_granule();
-            assert!(granule == 64u32);
+            // Once a non-zero period is cached, it is returned as-is without recomputing from the
+            // frequency.
+            TIMER_PERIOD.store(1234, Ordering::Relaxed);
+            assert_eq!(get_cpu_timer_value(0).unwrap(), (0, 1234));
+
+            // Reset the shared cache so the value does not leak into other tests.
+            TIMER_PERIOD.store(0, Ordering::Relaxed);
         });
     }
 
@@ -539,11 +448,8 @@ mod tests {
     #[test]
     fn test_get_impl_ref_returns_some_for_valid_pointer() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-            let protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let protocol = EfiCpuArchProtocolImpl::new(im);
 
             let this = &raw const protocol.protocol;
             let impl_ref = get_impl_ref(this).expect("non-null pointer should yield Some");
@@ -559,11 +465,8 @@ mod tests {
     #[test]
     fn test_get_impl_ref_mut_returns_some_for_valid_pointer() {
         with_locked_state(|| {
-            let mut cpu_init = MockEfiCpuInit::new();
-            cpu_init.expect_cache_writeback_granule().return_const(64_u32);
-            let cpu: Service<dyn Cpu> = Service::mock(Box::new(cpu_init));
             let im: Service<dyn InterruptManager> = Service::mock(Box::new(MockInterruptManager::new()));
-            let mut protocol = EfiCpuArchProtocolImpl::new(cpu, im);
+            let mut protocol = EfiCpuArchProtocolImpl::new(im);
 
             let this = &raw mut protocol.protocol;
             let impl_ref = get_impl_ref_mut(this).expect("non-null pointer should yield Some");

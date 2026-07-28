@@ -170,7 +170,7 @@ pub fn remove_runtime_image(image_handle: efi::Handle) -> Result<(), EfiError> {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::test_support;
@@ -219,7 +219,7 @@ mod tests {
     }
 
     fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             test_support::init_test_logger();
             // SAFETY: Test code only - initializing test infrastructure with the test lock held
             // prevents concurrent access during initialization.

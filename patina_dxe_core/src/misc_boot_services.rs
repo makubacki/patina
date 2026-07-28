@@ -7,13 +7,13 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use core::{ffi::c_void, slice::from_raw_parts, sync::atomic::Ordering};
+use patina::arch as interrupts;
 use patina::{
     base::guid as base_guids,
     log_debug_assert,
     pi::{protocol, status_code},
     uefi::event::EXIT_BOOT_SERVICES_FAILED_EVENT_GROUP_GUID,
 };
-use patina_internal_cpu::interrupts;
 use r_efi::efi;
 use spin::Once;
 
@@ -142,7 +142,7 @@ extern "efiapi" fn set_watchdog_timer(
     }
 }
 // Requires excessive Mocking for the OK case.
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 // This callback is invoked when the Metronome Architectural protocol is installed. It initializes the
 // METRONOME_ARCH_PTR to point to the Metronome Architectural protocol interface.
 extern "efiapi" fn metronome_arch_available(event: efi::Event, _context: *mut c_void) {
@@ -162,7 +162,7 @@ extern "efiapi" fn metronome_arch_available(event: efi::Event, _context: *mut c_
     }
 }
 // Requires excessive Mocking for the OK case.
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 // This callback is invoked when the Watchdog Timer Architectural protocol is installed. It initializes the
 // WATCHDOG_ARCH_PTR to point to the Watchdog Timer Architectural protocol interface.
 extern "efiapi" fn watchdog_arch_available(event: efi::Event, _context: *mut c_void) {
@@ -312,7 +312,7 @@ pub fn init_misc_boot_services_support(st: &mut EfiSystemTable) {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
     use crate::{
@@ -327,7 +327,7 @@ mod tests {
     where
         F: Fn(&mut EfiSystemTable) + std::panic::RefUnwindSafe,
     {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
             test_support::init_test_logger();
             // SAFETY: Test code only - initializing test infrastructure with the test lock held
             // to prevent concurrent access during initialization.
@@ -336,15 +336,6 @@ mod tests {
                 crate::test_support::init_test_protocol_db();
             }
             crate::systemtables::init_system_table();
-
-            let _guard = test_support::StateGuard::new(|| {
-                // SAFETY: Cleanup code runs with global lock held, resetting
-                // global state that was initialized above.
-                unsafe {
-                    crate::GCD.reset();
-                    crate::PROTOCOL_DB.reset();
-                }
-            });
 
             let mut st_guard = systemtables::SYSTEM_TABLE.lock();
             let st = st_guard.as_mut().expect("System Table not initialized!");

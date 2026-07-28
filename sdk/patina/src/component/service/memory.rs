@@ -834,7 +834,7 @@ pub enum PageAllocationStrategy {
 pub use mock::StdMemoryManager;
 
 #[cfg(any(test, feature = "mockall"))]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod mock {
     extern crate std;
     use std::{
@@ -922,7 +922,7 @@ mod mock {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     use core::{
         alloc::Layout,

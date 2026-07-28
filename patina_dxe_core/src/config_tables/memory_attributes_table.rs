@@ -249,7 +249,7 @@ pub fn core_install_memory_attributes_table() {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     extern crate std;
     use super::*;
@@ -263,7 +263,8 @@ mod tests {
     use patina::{base::UEFI_PAGE_SIZE, uefi_size_to_pages};
 
     fn with_locked_state<F: Fn() + std::panic::RefUnwindSafe>(f: F) {
-        test_support::with_global_lock(|| {
+        test_support::with_clean_global_lock(|| {
+            let _post_rtb_guard = test_support::StateGuard::new(|| POST_RTB.reset());
             POST_RTB.reset();
 
             // SAFETY: Test-only initialization under the global lock.
@@ -273,8 +274,6 @@ mod tests {
                 init_system_table();
             }
             f();
-
-            POST_RTB.reset();
         })
         .unwrap();
     }

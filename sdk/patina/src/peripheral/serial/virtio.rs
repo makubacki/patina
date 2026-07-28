@@ -126,7 +126,7 @@ impl<const N: usize, const B: usize> crate::peripheral::serial::SerialIO for Vir
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests {
     #![allow(clippy::indexing_slicing)]
 
