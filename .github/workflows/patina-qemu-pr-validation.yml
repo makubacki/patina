@@ -83,7 +83,7 @@ jobs:
 
           base_ref=$(echo "$pr_json" | jq -r '.base.ref')
 
-          # Only run QEMU validation for PRs targeting `main` or a `feature/**/*` branch.
+          # Only run QEMU validation for PRs targeting `skip_qemu_pr_val_on_unsupported_branches_test ` or a `feature/**/*` branch.
           if [[ "$base_ref" != "main" && "$base_ref" != feature/* ]]; then
             echo "::notice::PR #$pr_number targets '$base_ref', which is not a supported branch for QEMU validation. Skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"

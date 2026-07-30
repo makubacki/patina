@@ -19,6 +19,7 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
+      - skip_qemu_pr_val_on_unsupported_branches_test
       - feature/**/*
 
 concurrency:
