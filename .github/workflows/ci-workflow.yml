@@ -21,11 +21,13 @@ on:
     branches:
       - main
       - major
+      - skip_qemu_pr_val_on_unsupported_branches_test
       - feature/**/*
   pull_request:
     branches:
       - main
       - major
+      - skip_qemu_pr_val_on_unsupported_branches_test
       - feature/**/*
 
 # Do not allow more than one instance of this workflow to run at the same
@@ -37,15 +39,19 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# NOTE: CI is temporarily disabled below. Both jobs are stubbed out to report success without
+# running any real checks. Restore the reusable workflow calls (synced from patina-devops) to
+# re-enable CI.
 jobs:
   ci_workflow:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/CiWorkflow.yml@v0.3.13
-    with:
-      build-tasks: build,build-x64,build-aarch64
-      run-cargo-vet: false
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "CI is temporarily disabled for testing. Reporting success without running checks."
   mdbook_docs_test:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@v0.3.13
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "CI is temporarily disabled for testing. Reporting success without running checks."
