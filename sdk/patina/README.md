@@ -44,7 +44,6 @@ The SDK is organized into the following root-level modules.
 | ------- | ------- |
 | `alloc` | Allow allocation APIs when targeting `no_std` firmware environments with a custom allocator. |
 | `core` | **INTERNAL ONLY** - Expose core internal interfaces. Only for use in the Patina repo. |
-| `doc` | Pull in items needed to build documentation. |
 | `global_allocator` | Install the global allocator support used by Patina firmware images. |
 | `mockall` | Provide mock implementations for Boot Services and other traits (implies `std`). |
 | `serde` | Enable serialization support for configuration and PI data structures. |
