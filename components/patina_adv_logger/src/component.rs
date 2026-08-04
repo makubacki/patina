@@ -14,11 +14,14 @@ use patina::standard::efi;
 use patina::{
     component::{
         component,
-        service::{Service, perf_timer::ArchTimerFunctionality},
+        service::{
+            Service,
+            perf_timer::ArchTimerFunctionality,
+            uefi_services::protocol::{ProtocolServices, ProtocolServicesExt},
+        },
     },
     error::{EfiError, Result},
     peripheral::serial::SerialIO,
-    uefi::boot_services::{BootServices, StandardBootServices},
 };
 
 use crate::{logger::AdvancedLogger, protocol::AdvancedLoggerProtocol};
@@ -82,7 +85,11 @@ where
     ///
     /// Installs the Advanced Logger Protocol for use by non-local components.
     ///
-    fn entry_point(self, bs: StandardBootServices, timer: Service<dyn ArchTimerFunctionality>) -> Result<()> {
+    fn entry_point(
+        self,
+        protocols: Service<dyn ProtocolServices>,
+        timer: Service<dyn ArchTimerFunctionality>,
+    ) -> Result<()> {
         let Some(address) = self.adv_logger.get_log_address() else {
             log::error!("Advanced logger not initialized before component entry point!");
             return Err(EfiError::NotStarted);
@@ -96,9 +103,9 @@ where
         };
 
         let protocol = Box::leak(Box::new(protocol));
-        match bs.install_protocol_interface(None, &mut protocol.protocol) {
-            Err(status) => {
-                log::error!("Failed to install Advanced Logger protocol! Status = {status}");
+        match protocols.install_protocol::<AdvancedLoggerProtocol>(None, &protocol.protocol) {
+            Err(err) => {
+                log::error!("Failed to install Advanced Logger protocol! Status = {err:?}");
                 Err(EfiError::ProtocolError)
             }
             Ok(_) => {
