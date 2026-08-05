@@ -24,7 +24,7 @@ pub enum AcpiError {
     /// There was an attempt to install the FADT more than once.
     /// While most ACPI tables are allowed to be duplicated, the FADT is not.
     FadtAlreadyInstalled,
-    /// Boot services was unable to install the ACPI table using `install_configuration_table`,
+    /// Configuration table services were unable to install the ACPI table using `install_configuration_table`,
     InstallConfigurationTableFailed,
     /// An invalid table key was passed into `uninstall_acpi_table`,
     /// A table key is invalid when it is not a known value returned by `install_acpi_table`,
@@ -54,8 +54,8 @@ pub enum AcpiError {
     NullTablePtr,
     /// `get_acpi_table<T>` was provided a type that does not match the type of the table at the given index.
     InvalidTableType,
-    /// There was an attempt to initialize the boot services pointer after it has already been set.
-    BootServicesAlreadyInitialized,
+    /// There was an attempt to initialize the configuration table services after it has already been set.
+    ConfigTableServicesAlreadyInitialized,
     /// There was an attempt to initialize the memory manager after it has already been set.
     MemoryManagerAlreadyInitialized,
     /// The provider instance was not initialized.
@@ -100,7 +100,7 @@ impl From<AcpiError> for efi::Status {
             AcpiError::TableNotPresentInMemory => efi::Status::NOT_FOUND,
             AcpiError::NullTablePtr => efi::Status::INVALID_PARAMETER,
             AcpiError::InvalidTableType => efi::Status::INVALID_PARAMETER,
-            AcpiError::BootServicesAlreadyInitialized => efi::Status::ALREADY_STARTED,
+            AcpiError::ConfigTableServicesAlreadyInitialized => efi::Status::ALREADY_STARTED,
             AcpiError::MemoryManagerAlreadyInitialized => efi::Status::ALREADY_STARTED,
             AcpiError::ProviderNotInitialized => efi::Status::NOT_FOUND,
             AcpiError::XsdtOverflow => efi::Status::INVALID_PARAMETER,
