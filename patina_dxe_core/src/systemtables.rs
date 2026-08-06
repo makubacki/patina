@@ -12,7 +12,16 @@ use core::{ffi::c_void, mem::size_of, slice::from_raw_parts};
 
 use alloc::boxed::Box;
 use patina::standard::efi;
-use patina::{component::component, pi::error_codes::EFI_NOT_AVAILABLE_YET, uefi::boot_services::BootServices};
+use patina::{
+    component::{
+        component,
+        service::{
+            Service,
+            uefi_services::protocol::{ProtocolServices, Tpl},
+        },
+    },
+    pi::error_codes::EFI_NOT_AVAILABLE_YET,
+};
 
 use crate::{allocator::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR, tpl_mutex};
 
@@ -884,11 +893,7 @@ pub(crate) struct SystemTableChecksumInstaller;
 
 #[component]
 impl SystemTableChecksumInstaller {
-    fn entry_point(self, bs: patina::uefi::boot_services::StandardBootServices) -> patina::error::Result<()> {
-        extern "efiapi" fn callback(_event: efi::Event, _: *mut c_void) {
-            SYSTEM_TABLE.lock().as_mut().expect("System Table is initialized").checksum_all();
-        }
-
+    fn entry_point(self, protocols: Service<dyn ProtocolServices>) -> patina::error::Result<()> {
         const GUIDS: [efi::Guid; 16] = [
             efi::Guid::from_bytes(&uuid::uuid!("1DA97072-BDDC-4B30-99F1-72A0B56FFF2A").to_bytes_le()), // gEfiMonotonicCounterArchProtocolGuid
             efi::Guid::from_bytes(&uuid::uuid!("1E5668E2-8481-11D4-BCF1-0080C73C8881").to_bytes_le()), // gEfiVariableArchProtocolGuid
@@ -909,14 +914,14 @@ impl SystemTableChecksumInstaller {
         ];
 
         for guid in &GUIDS {
-            let event = bs.create_event(
-                patina::uefi::event::EventType::NOTIFY_SIGNAL,
-                patina::uefi::boot_services::tpl::Tpl::CALLBACK,
-                Some(callback),
-                core::ptr::null_mut(),
+            // The core drains already-installed handles immediately, covering protocols installed earlier.
+            protocols.register_install_notify(
+                *guid,
+                Tpl::Callback,
+                Box::new(|_handle| {
+                    SYSTEM_TABLE.lock().as_mut().expect("System Table is initialized").checksum_all();
+                }),
             )?;
-
-            bs.register_protocol_notify(guid, event)?;
         }
 
         Ok(())
