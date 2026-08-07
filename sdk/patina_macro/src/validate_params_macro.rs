@@ -232,7 +232,6 @@ enum ParamType {
     Storage,                 // &Storage
     StorageMut,              // &mut Storage
     Commands,                // Commands
-    StandardBootServices,    // StandardBootServices (UEFI Boot Services)
     StandardRuntimeServices, // StandardRuntimeServices (UEFI Runtime Services)
     Other,                   // Any other parameter type
 }
@@ -271,11 +270,6 @@ impl ParamType {
 
             // Duplicate Commands
             (ParamType::Commands, ParamType::Commands) => Some("Only one Commands parameter is allowed."),
-
-            // Duplicate StandardBootServices
-            (ParamType::StandardBootServices, ParamType::StandardBootServices) => {
-                Some("Only one StandardBootServices parameter is allowed.")
-            }
 
             // Duplicate StandardRuntimeServices
             (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
@@ -399,11 +393,6 @@ fn classify_param(ty: &Type) -> ParamType {
                 return ParamType::Commands;
             }
 
-            // Check for StandardBootServices
-            if base_name == "StandardBootServices" {
-                return ParamType::StandardBootServices;
-            }
-
             // Check for StandardRuntimeServices
             if base_name == "StandardRuntimeServices" {
                 return ParamType::StandardRuntimeServices;
@@ -485,7 +474,6 @@ pub(crate) fn check_param_conflicts(func: &ItemFn) -> Result<(), TokenStream> {
                 let note_msg = match (type1, type2) {
                     (ParamType::ConfigMut(_), ParamType::ConfigMut(_))
                     | (ParamType::Commands, ParamType::Commands)
-                    | (ParamType::StandardBootServices, ParamType::StandardBootServices)
                     | (ParamType::StandardRuntimeServices, ParamType::StandardRuntimeServices) => {
                         format!("first '{}' parameter here", name1)
                     }
@@ -1137,32 +1125,6 @@ mod tests {
     }
 
     #[test]
-    fn test_detects_duplicate_standard_boot_services() {
-        let input = quote! {
-            fn entry_point(self, bs1: StandardBootServices, bs2: StandardBootServices) -> Result<()> {
-                Ok(())
-            }
-        };
-
-        let result = validate_component_params2(quote!(), input);
-        assert!(result.to_string().contains("compile_error"));
-        assert!(result.to_string().contains("Patina component parameter conflict detected"));
-        assert!(result.to_string().contains("StandardBootServices"));
-    }
-
-    #[test]
-    fn test_allows_single_standard_boot_services() {
-        let input = quote! {
-            fn entry_point(comp: MyComponent, bs: StandardBootServices) -> Result<()> {
-                Ok(())
-            }
-        };
-
-        let result = validate_component_params2(quote!(), input);
-        assert!(!result.to_string().contains("compile_error"));
-    }
-
-    #[test]
     fn test_detects_duplicate_standard_runtime_services() {
         let input = quote! {
             fn entry_point(self, rs1: StandardRuntimeServices, rs2: StandardRuntimeServices) -> Result<()> {
@@ -1189,39 +1151,6 @@ mod tests {
     }
 
     #[test]
-    fn test_allows_both_boot_and_runtime_services() {
-        let input = quote! {
-            fn entry_point(
-                comp: MyComponent,
-                bs: StandardBootServices,
-                rs: StandardRuntimeServices
-            ) -> Result<()> {
-                Ok(())
-            }
-        };
-
-        let result = validate_component_params2(quote!(), input);
-        assert!(!result.to_string().contains("compile_error"));
-    }
-
-    #[test]
-    fn test_detects_qualified_standard_boot_services() {
-        let input = quote! {
-            fn entry_point(
-                self,
-                bs1: StandardBootServices,
-                bs2: patina::boot_services::StandardBootServices
-            ) -> Result<()> {
-                Ok(())
-            }
-        };
-
-        let result = validate_component_params2(quote!(), input);
-        assert!(result.to_string().contains("compile_error"));
-        assert!(result.to_string().contains("StandardBootServices"));
-    }
-
-    #[test]
     fn test_detects_qualified_standard_runtime_services() {
         let input = quote! {
             fn entry_point(
@@ -1243,7 +1172,6 @@ mod tests {
         let input = quote! {
             fn entry_point(
                 comp: MyComponent,
-                bs: StandardBootServices,
                 rs: StandardRuntimeServices,
                 config: Config<u32>,
                 service: Service<Foo>,
