@@ -195,114 +195,6 @@ pub struct Service<T: ?Sized + 'static> {
 }
 
 impl<T: ?Sized + 'static> Service<T> {
-    /// Creates a new instance of a service with an uninitialized value.
-    ///
-    /// Useful for const instantiation of a service, such as for static references or other types that require a
-    /// static lifetime that is executed during compilation.
-    ///
-    /// If you use this function to create an uninitialized service, you **MUST** call [replace](Self::replace)
-    /// before using the service, or else dereferencing the service will panic. If you cannot guarantee that the service
-    /// will be initialized before use, consider using [map_or](Self::map_or), [map_or_else](Self::map_or_else), or
-    /// [map_or_default](Self::map_or_default) for any access to the service.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # use patina::{error::Result, component::service::Service};
-    /// # trait MyService {}
-    /// static MY_SERVICE: Service<dyn MyService> = Service::new_uninit();
-    ///
-    /// fn my_component(service: Service<dyn MyService>) -> Result<()> {
-    ///     MY_SERVICE.replace(&service);
-    ///     Ok(())
-    /// }
-    /// ```
-    pub const fn new_uninit() -> Self {
-        Self { value: OnceCell::new(), _marker: PhantomData }
-    }
-
-    /// Replaces the uninitialized service with the provided, initialized, service.
-    ///
-    /// ## Panics
-    ///
-    /// Panics if the service is already initialized or if the provided service is not initialized.
-    pub fn replace(&self, service: &Service<T>) {
-        let v = service.value.get().expect("Provided Service was not initialized!");
-        self.value.set(*v).expect("Service was already initialized!");
-    }
-
-    /// Returns true if the service is initialized.
-    pub fn is_init(&self) -> bool {
-        self.value.get().is_some()
-    }
-
-    /// Returns the provided default result (if uninitalized), or applies a function to the contained value (if any).
-    ///
-    /// Arguments passed to map_or are eagerly evaluated; if you are passing the result of a function call, it is
-    /// recommended to use map_or_else, which is lazily evaluated.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use patina::component::service::Service;
-    ///
-    /// trait Example {
-    ///   fn do_something(&self) -> u32;
-    /// }
-    ///
-    /// let service: Service<dyn Example> = Service::new_uninit();
-    /// assert_eq!(service.map_or(10, |s| s.do_something()), 10);
-    /// ```
-    pub fn map_or<U, F>(&self, default: U, f: F) -> U
-    where
-        F: FnOnce(&Service<T>) -> U,
-    {
-        if self.value.get().is_some() { f(self) } else { default }
-    }
-
-    /// Computes a default function result (if uninitialized), or applies a different function to the contained value (if any).
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use patina::component::service::Service;
-    ///
-    /// trait Example {
-    ///   fn do_something(&self) -> u32;
-    /// }
-    /// let service: Service<dyn Example> = Service::new_uninit();
-    /// assert_eq!(service.map_or_else(|| 10, |s| s.do_something()), 10);
-    /// ```
-    pub fn map_or_else<U, D, F>(&self, default: D, f: F) -> U
-    where
-        D: FnOnce() -> U,
-        F: FnOnce(&Service<T>) -> U,
-    {
-        if self.value.get().is_some() { f(self) } else { default() }
-    }
-
-    /// Returns the default value of U (if uninitalized), or applies a function to the contained value (if any).
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use patina::component::service::Service;
-    ///
-    /// trait Example {
-    ///  fn do_something(&self) -> u32;
-    /// }
-    ///
-    /// let service: Service<dyn Example> = Service::new_uninit();
-    /// assert_eq!(service.map_or_default(|s| s.do_something()), 0u32);
-    /// ```
-    pub fn map_or_default<U, F>(&self, f: F) -> U
-    where
-        U: Default,
-        F: FnOnce(&Service<T>) -> U,
-    {
-        if self.value.get().is_some() { f(self) } else { U::default() }
-    }
-
     /// Creates an instance of Service by creating a Box\<dyn T\> and then leaking it to a static lifetime.
     ///
     /// This function is intended for testing purposes only. Dropping the returned value will cause a memory leak as
@@ -348,7 +240,7 @@ impl<T: ?Sized + 'static> Service<T> {
 
 impl<T: ?Sized + 'static> From<&'static dyn Any> for Service<T> {
     fn from(value: &'static dyn Any) -> Self {
-        let s = Self::new_uninit();
+        let s = Self { value: OnceCell::new(), _marker: PhantomData };
         s.value.set(value).expect("Once Cell was just created");
         s
     }
@@ -362,9 +254,9 @@ impl<T: ?Sized + 'static> Deref for Service<T> {
             if let Some(service) = service.downcast_ref() {
                 service
             } else {
-                // All construction paths (mock, from, initialize) guarantee that the downcast will succeed.
-                // unreachable! is used here instead of unreachable_unchecked to avoid UB if this invariant is
-                // ever violated (e.g., via the public From<&'static dyn Any> impl with a mismatched type).
+                // Both construction paths (mock, from) guarantee that the downcast will succeed. unreachable! is
+                // used here instead of unreachable_unchecked to avoid UB if this invariant is ever violated (e.g.,
+                // via the public From<&'static dyn Any> impl with a mismatched type).
                 //
                 // However, this is a potential point for performance improvement in the future as the component
                 // infrastructure evolves and the number of components increases.
@@ -374,8 +266,8 @@ impl<T: ?Sized + 'static> Deref for Service<T> {
                 )
             }
         } else {
-            // We use unreachable! here instead of panic! as this provides compiler hints to the optimizer. We cannot
-            // use core::hint::unreachable_unchecked() here as we cannot guarantee that the service is initialized
+            // Every construction path (mock, from) sets a value before returning, so this is unreachable. We use
+            // unreachable! here instead of panic! as this provides compiler hints to the optimizer.
             unreachable!("Service should be initialized first!");
         }
     }
@@ -637,73 +529,5 @@ mod tests {
 
         let service = storage.get_service::<dyn MyService>().unwrap();
         assert_eq!(42, service.do_something());
-    }
-
-    #[test]
-    fn test_replace_service_works() {
-        trait MyService {
-            fn do_something(&self) -> u32;
-        }
-        struct MockService;
-        impl MyService for MockService {
-            fn do_something(&self) -> u32 {
-                42
-            }
-        }
-
-        let service1: Service<dyn MyService> = Service::mock(Box::new(MockService));
-        let service2: Service<dyn MyService> = Service::new_uninit();
-
-        assert_eq!(42, service1.do_something());
-        service2.replace(&service1);
-        assert_eq!(42, service2.do_something());
-        assert_eq!(42, service1.do_something()); // service1 should still work
-    }
-
-    #[test]
-    #[should_panic = "Service should be initialized first!"]
-    fn test_uninitialized_service_panics_instead_of_ub() {
-        trait MyService {
-            fn do_something(&self) -> u32;
-        }
-
-        let service: Service<dyn MyService> = Service::new_uninit();
-        service.do_something(); // This should panic
-    }
-
-    #[test]
-    fn test_map_function_on_uninit() {
-        trait TestService {
-            fn get_value(&self) -> u32;
-        }
-
-        let service: Service<dyn TestService> = Service::new_uninit();
-        assert!(!service.is_init());
-
-        assert_eq!(service.map_or(100, |s| s.get_value()), 100);
-        assert_eq!(service.map_or_else(|| 200, |s| s.get_value()), 200);
-        assert_eq!(service.map_or_default(|s| s.get_value()), 0);
-    }
-
-    #[test]
-    fn test_map_functions_on_init() {
-        trait TestService {
-            fn get_value(&self) -> u32;
-        }
-
-        struct TestServiceImpl;
-
-        impl TestService for TestServiceImpl {
-            fn get_value(&self) -> u32 {
-                42
-            }
-        }
-
-        let service: Service<dyn TestService> = Service::mock(Box::new(TestServiceImpl));
-        assert!(service.is_init());
-
-        assert_eq!(service.map_or(100, |s| s.get_value()), 42);
-        assert_eq!(service.map_or_else(|| 200, |s| s.get_value()), 42);
-        assert_eq!(service.map_or_default(|s| s.get_value()), 42);
     }
 }
