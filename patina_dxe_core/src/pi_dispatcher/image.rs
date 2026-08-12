@@ -742,7 +742,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
         file_path: Option<NonNull<Protocol>>,
         image: Option<&[u8]>,
     ) -> Result<efi::Handle, ImageStatus> {
-        self.performance.map_or_default(|perf| perf.perf_load_image_begin(core::ptr::null_mut()));
+        self.performance.get().map(|perf| perf.perf_load_image_begin(core::ptr::null_mut())).unwrap_or_default();
 
         if image.is_none() && file_path.is_none() {
             log::error!("failed to load image: both source buffer and device path are null.");
@@ -826,7 +826,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
             private_info.image_info.image_size as usize,
         );
 
-        self.performance.map_or_default(|perf| perf.perf_load_image_end(handle));
+        self.performance.get().map(|perf| perf.perf_load_image_end(handle)).unwrap_or_default();
 
         match security_status {
             Err(EfiError::SecurityViolation) => Err(ImageStatus::SecurityViolation(handle)),
@@ -906,7 +906,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
         // allocate a buffer for the entry point stack.
         let stack = ImageStack::new(ENTRY_POINT_STACK_SIZE)?;
 
-        self.performance.map_or_default(|perf| perf.perf_image_start_begin(image_handle));
+        self.performance.get().map(|perf| perf.perf_image_start_begin(image_handle)).unwrap_or_default();
 
         // define a co-routine that wraps the entry point execution. this doesn't
         // run until the coroutine.resume() call below.
@@ -976,7 +976,7 @@ impl<P: super::PlatformInfo> super::PiDispatcher<P> {
 
         self.image_data.lock().current_running_image = previous_image;
 
-        self.performance.map_or_default(|perf| perf.perf_image_start_end(image_handle));
+        self.performance.get().map(|perf| perf.perf_image_start_end(image_handle)).unwrap_or_default();
 
         match status {
             efi::Status::SUCCESS => Ok(()),
