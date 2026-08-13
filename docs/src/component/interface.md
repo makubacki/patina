@@ -253,7 +253,7 @@ Components access UEFI Boot Services functionality through the granular services
 module, such as `ProtocolServices`, `EventServices`, `TplServices`, `ImageServices`, `ConfigurationTableServices`,
 `DriverServices`, `TimerEventServices`, and `MiscServices`. Each service is consumed the same way as any other
 `Service<T>` parameter, so a component only depends on the specific functionality it uses instead of the entire
-Boot Services table.
+Boot Services table. See [Patina UEFI Services](uefi_services.md) for more information.
 
 ```rust
 # extern crate patina;
