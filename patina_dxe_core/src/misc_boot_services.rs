@@ -10,6 +10,7 @@ use core::{ffi::c_void, slice::from_raw_parts, sync::atomic::Ordering};
 use patina::arch as interrupts;
 use patina::standard::efi;
 use patina::{
+    crc32,
     guid as base_guids, log_debug_assert,
     pi::{protocol, status_code},
     uefi::event::EXIT_BOOT_SERVICES_FAILED_EVENT_GROUP_GUID,
@@ -78,7 +79,7 @@ unsafe extern "efiapi" fn calculate_crc32(data: *mut c_void, data_size: usize, c
     // SAFETY: caller must ensure that data and crc_32 are valid pointers. They are null-checked above.
     unsafe {
         let buffer = from_raw_parts(data as *mut u8, data_size);
-        crc_32.write_unaligned(crc32fast::hash(buffer));
+        crc_32.write_unaligned(crc32::calculate_crc32(buffer));
     }
 
     efi::Status::SUCCESS
@@ -366,7 +367,7 @@ mod tests {
             };
             // Verify the function succeeded and CRC32 was calculated correctly for zero buffer
             if status == efi::Status::SUCCESS {
-                let expected_crc = crc32fast::hash(&BUFFER);
+                let expected_crc = crc32::calculate_crc32(&BUFFER);
                 if data_crc == expected_crc {
                     log::debug!("CRC32 calculation successful: {data_crc:#x}");
                 } else {
