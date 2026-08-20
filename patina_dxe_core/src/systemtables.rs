@@ -12,7 +12,7 @@ use core::{ffi::c_void, mem::size_of, slice::from_raw_parts};
 
 use alloc::boxed::Box;
 use patina::standard::efi;
-use patina::{component::component, pi::error_codes::EFI_NOT_AVAILABLE_YET, uefi::boot_services::BootServices};
+use patina::{component::component, crc32, pi::error_codes::EFI_NOT_AVAILABLE_YET, uefi::boot_services::BootServices};
 
 use crate::{allocator::EFI_RUNTIME_SERVICES_DATA_ALLOCATOR, tpl_mutex};
 
@@ -50,7 +50,7 @@ impl EfiRuntimeServicesTable {
         // SAFETY: table_copy is a valid, initialized RuntimeServices value on the stack.
         let tbl_slice =
             unsafe { from_raw_parts(&raw const table_copy as *const u8, size_of::<efi::RuntimeServices>()) };
-        table_copy.hdr.crc32 = crc32fast::hash(tbl_slice);
+        table_copy.hdr.crc32 = crc32::calculate_crc32(tbl_slice);
 
         // SAFETY: structure construction ensures pointer is valid.
         unsafe { self.runtime_services.write(table_copy) }
@@ -250,7 +250,7 @@ impl EfiBootServicesTable {
 
         // SAFETY: table_copy is a valid, initialized BootServices value on the stack.
         let tbl_slice = unsafe { from_raw_parts(&raw const table_copy as *const u8, size_of::<efi::BootServices>()) };
-        table_copy.hdr.crc32 = crc32fast::hash(tbl_slice);
+        table_copy.hdr.crc32 = crc32::calculate_crc32(tbl_slice);
 
         // SAFETY: structure construction ensures pointer is valid.
         unsafe { self.boot_services.write(table_copy) }
@@ -740,7 +740,7 @@ impl EfiSystemTable {
 
         // SAFETY: table_copy is a valid, initialized SystemTable value on the stack.
         let st_slice = unsafe { from_raw_parts(&raw const table_copy as *const u8, size_of::<efi::SystemTable>()) };
-        table_copy.hdr.crc32 = crc32fast::hash(st_slice);
+        table_copy.hdr.crc32 = crc32::calculate_crc32(st_slice);
 
         // SAFETY: structure construction ensures pointer is valid.
         unsafe { self.system_table.write(table_copy) }

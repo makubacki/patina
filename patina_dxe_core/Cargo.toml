@@ -15,7 +15,6 @@ workspace = true
 [dependencies]
 bitfield-struct = { workspace = true }
 cfg-if = { workspace = true }
-crc32fast = { workspace = true }
 goblin = { workspace = true, features = ["pe32", "pe64", "te"] }
 linked_list_allocator = { workspace = true }
 log = { workspace = true }

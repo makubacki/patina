@@ -25,6 +25,7 @@ use patina::standard::efi;
 use patina::{
     BinaryGuid, Char16Str, OwnedGuid,
     component::service::Service,
+    crc32,
     error::EfiError,
     pi::{
         fw_fs::ffs,
@@ -241,8 +242,10 @@ impl<P: PlatformInfo> PiDispatcher<P> {
                 },
             );
 
-            let crc32 =
-                crc32fast::hash(alloc::slice::from_raw_parts(ptr as *const u8, size_of::<efi::SystemTablePointer>()));
+            let crc32 = crc32::calculate_crc32(alloc::slice::from_raw_parts(
+                ptr as *const u8,
+                size_of::<efi::SystemTablePointer>(),
+            ));
 
             core::ptr::write_volatile(&raw mut (*ptr).crc32, crc32);
         }
