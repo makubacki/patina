@@ -994,6 +994,16 @@ mod tests {
         assert!(name == "Firmware");
     }
 
+    const CHAR8_MACRO_CONST: &Char8Str = char8!("Firmware");
+    static CHAR8_MACRO_STATIC_TABLE: [&Char8Str; 2] = [char8!("A"), char8!("B")];
+
+    #[test]
+    fn test_char8_macro_in_const_and_static_context() {
+        assert!(CHAR8_MACRO_CONST == "Firmware");
+        assert!(CHAR8_MACRO_STATIC_TABLE[0] == "A");
+        assert!(CHAR8_MACRO_STATIC_TABLE[1] == "B");
+    }
+
     #[test]
     fn test_char8_array_binary_layout() {
         assert_eq!(core::mem::size_of::<Char8Array<8>>(), 8);
