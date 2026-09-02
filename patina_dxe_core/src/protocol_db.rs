@@ -370,14 +370,14 @@ impl ProtocolDb {
         Ok(())
     }
 
-    fn add_protocol_usage(
-        &mut self,
+    /// Validates the handles and attributes of an open request without consulting the protocol's usage list.
+    fn validate_open_parameters(
+        &self,
         handle: efi::Handle,
-        protocol: efi::Guid,
         agent_handle: Option<efi::Handle>,
         controller_handle: Option<efi::Handle>,
         attributes: u32,
-    ) -> Result<(), EfiError> {
+    ) -> Result<OpenProtocolInformation, EfiError> {
         self.validate_handle(handle)?;
 
         if let Some(agent) = agent_handle {
@@ -388,27 +388,32 @@ impl ProtocolDb {
             self.validate_handle(controller)?;
         }
 
+        OpenProtocolInformation::new(handle, agent_handle, controller_handle, attributes)
+    }
+
+    fn add_protocol_usage(
+        &mut self,
+        handle: efi::Handle,
+        protocol: efi::Guid,
+        agent_handle: Option<efi::Handle>,
+        controller_handle: Option<efi::Handle>,
+        attributes: u32,
+    ) -> Result<(), EfiError> {
+        // Invalid parameters are reported first.
+        let new_using_agent = self.validate_open_parameters(handle, agent_handle, controller_handle, attributes)?;
+
         let key = handle as usize;
         let handle_instance = self.handles.get_mut(&key).ok_or(EfiError::Unsupported)?;
         let instance = handle_instance.get_mut(&OrdGuid(protocol)).ok_or(EfiError::Unsupported)?;
 
-        let new_using_agent = OpenProtocolInformation::new(handle, agent_handle, controller_handle, attributes)?;
-        let exact_match = instance.usage.iter_mut().find(|user| user == &&new_using_agent);
-
-        if instance.opened_by_driver && exact_match.is_some() {
-            return Err(EfiError::AlreadyStarted);
-        }
-
-        if !instance.opened_by_exclusive
-            && let Some(exact_match) = exact_match
-        {
-            exact_match.open_count += 1;
-            return Ok(());
-        }
-
         const BY_DRIVER_EXCLUSIVE: u32 = efi::OPEN_PROTOCOL_BY_DRIVER | efi::OPEN_PROTOCOL_EXCLUSIVE;
         match attributes {
-            efi::OPEN_PROTOCOL_BY_DRIVER | efi::OPEN_PROTOCOL_EXCLUSIVE | BY_DRIVER_EXCLUSIVE => {
+            efi::OPEN_PROTOCOL_BY_DRIVER | BY_DRIVER_EXCLUSIVE => {
+                // This matches edk2 behvaior where only an identical agent, controller and
+                // attributes is considered ALREADY_STARTED.
+                if instance.usage.contains(&new_using_agent) {
+                    return Err(EfiError::AlreadyStarted);
+                }
                 //Note: Per UEFI spec, a request to open with efi::OPEN_PROTOCOL_EXCLUSIVE set should result in a disconnect
                 //of existing controllers that have the driver efi::OPEN_PROTOCOL_BY_DRIVER. This needs to be done in the
                 //caller, since this library doesn't have access to DisconnectController, and is also executing under
@@ -418,11 +423,18 @@ impl ProtocolDb {
                     return Err(EfiError::AccessDenied);
                 }
             }
-            efi::OPEN_PROTOCOL_BY_CHILD_CONTROLLER
-            | efi::OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
-            | efi::OPEN_PROTOCOL_GET_PROTOCOL
-            | efi::OPEN_PROTOCOL_TEST_PROTOCOL => (),
-            _ => panic!("Unsupported attributes: {attributes:#x?}"), //this should have been dealt with in ProtocolUsingAgent::new().
+            efi::OPEN_PROTOCOL_EXCLUSIVE => {
+                // See the note above about disconnecting BY_DRIVER holders in the caller.
+                if instance.opened_by_exclusive || instance.opened_by_driver {
+                    return Err(EfiError::AccessDenied);
+                }
+            }
+            _ => {
+                if let Some(exact_match) = instance.usage.iter_mut().find(|usage| **usage == new_using_agent) {
+                    exact_match.open_count += 1;
+                    return Ok(());
+                }
+            }
         }
 
         if agent_handle.is_none() {
@@ -762,9 +774,8 @@ impl SpinLockedProtocolDb {
     /// # Errors
     ///
     /// Returns [`INVALID_PARAMETER`](efi::Status::INVALID_PARAMETER) if incorrect parameters are given.
-    /// Returns [`NOT_FOUND`](efi::Status::NOT_FOUND) if no matching interfaces are found.
-    /// Returns [`ALREADY_STARTED`](efi::Status::ALREADY_STARTED) if attributes is `BY_DRIVER` and there is an
-    ///     existing usage by the agent handle.
+    /// Returns [`ALREADY_STARTED`](efi::Status::ALREADY_STARTED) if attributes is `BY_DRIVER` or
+    ///     `BY_DRIVER | EXCLUSIVE` and the same agent and controller already have a usage with exactly those attributes.
     /// Returns [`ACCESS_DENIED`](efi::Status::ACCESS_DENIED) if attributes is `efi::OPEN_PROTOCOL_BY_DRIVER` |
     ///     `efi::OPEN_PROTOCOL_EXCLUSIVE` | `BY_DRIVER_EXCLUSIVE` and there is an existing usage that conflicts with those
     ///     attributes.
@@ -778,6 +789,25 @@ impl SpinLockedProtocolDb {
         attributes: u32,
     ) -> Result<(), EfiError> {
         self.lock().add_protocol_usage(handle, protocol, agent_handle, controller_handle, attributes)
+    }
+
+    /// Validates the handles and attributes of an `EFI_BOOT_SERVICES.OpenProtocol()` request without recording a usage.
+    ///
+    /// This lets callers reject illegal requests before performing side effects (such as disconnecting drivers) that
+    /// [`add_protocol_usage`](SpinLockedProtocolDb::add_protocol_usage) would otherwise reject afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`INVALID_PARAMETER`](efi::Status::INVALID_PARAMETER) if a handle is invalid, `attributes` is not a
+    /// legal value, or a handle that `attributes` requires is missing.
+    pub fn validate_open_protocol_parameters(
+        &self,
+        handle: efi::Handle,
+        agent_handle: Option<efi::Handle>,
+        controller_handle: Option<efi::Handle>,
+        attributes: u32,
+    ) -> Result<(), EfiError> {
+        self.lock().validate_open_parameters(handle, agent_handle, controller_handle, attributes).map(|_| ())
     }
 
     /// Removes a protocol usage from the specified handle/protocol.

@@ -539,13 +539,17 @@ database does not have access to these APIs.
 The `open_protocol` function executes the following logic:
 
 1. Validate inputs: `protocol` and `interface` pointers must not be null (null `interface` is permitted for
-`TEST_PROTOCOL` attribute), `agent` and `controller` handles must be valid.
-2. If the `EXCLUSIVE` flag is set in the attributes, retrive all current usages for the `handle` and if any of those
-usages indicate that the `protocol` is open `BY_DRIVER`, then execute
-[`core_disconnect_controller`](driver_model.md#disconnecting-a-controller) to close the protocol usage.
-3. Call `add_protocol_usage` to insert a new usage representing this open operation into the protocol database. Note: in
-most cases where there is an error returned from `add_protocol_usage`, the error is simply returned. but in the special
-case of `ALREADY_STARTED` with a requested attribute containing `BY_DRIVER`, the interface pointer is also returned.
+`TEST_PROTOCOL` attribute), `agent` and `controller` handles must be valid, and the attributes must be valid for the
+supplied handles. Invalid requests are rejected before any other step runs.
+2. If the `EXCLUSIVE` flag is set in the attributes and no usage is already open `EXCLUSIVE`, retrieve all current usages
+for the `handle` and, for each usage that is open `BY_DRIVER`, execute
+[`core_disconnect_controller`](driver_model.md#disconnecting-a-controller) to close the protocol usage. A `BY_DRIVER`
+usage that remains afterwards results in `ACCESS_DENIED` from the next step.
+3. Call `add_protocol_usage` to insert a new usage representing this open operation into the protocol database. Errors
+from `add_protocol_usage` are returned as-is. This includes `ALREADY_STARTED`, which is returned when the same agent
+already has the protocol open with `BY_DRIVER` or `BY_DRIVER | EXCLUSIVE` for the same controller. A different agent, or
+the same agent with a different controller, gets `ACCESS_DENIED`. The raw `open_protocol` function (but not the
+Rust service) additionally writes the interface pointer in that case, as the EDK II implementation does.
 Also, if the requested attribute contained `TEST_PROTOCOL`, then the interface is not returned on success.
 
 ### Close Protocol Interface

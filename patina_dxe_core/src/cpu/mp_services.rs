@@ -217,11 +217,10 @@ impl MpBistReporter {
             if reported {
                 return;
             }
-            match deferred_protocols.open_protocol::<StatusCodeProtocol>(handle) {
-                Ok(status_code) => {
-                    Self::report_bist_errors(&status_code, bist_error_count);
-                    reported = true;
-                }
+            match deferred_protocols.with_protocol_on::<StatusCodeProtocol, _>(handle, |status_code| {
+                Self::report_bist_errors(status_code, bist_error_count);
+            }) {
+                Ok(()) => reported = true,
                 Err(e) => {
                     log::error!("MP Services: Failed to open installed status code protocol: {e:?}");
                 }
