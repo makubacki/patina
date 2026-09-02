@@ -531,7 +531,7 @@ mod tests {
             service.open_interface(handle, guid, agent, attributes).unwrap();
 
             // Reopening with the same agent/controller/attributes will return ALREADY_STARTED internally, but
-            // open_interface should returrn Ok with the interface still returned.
+            // open_interface should return Ok with the interface still returned.
             let reopened = service.open_interface(handle, guid, agent, attributes).unwrap();
             assert_eq!(reopened, interface);
         });
