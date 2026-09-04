@@ -53,6 +53,19 @@ these `DynamicEx` token numbers are fixed in the `.dec` file itself.
 defaults to the display's highest available resolution and largest text mode (a value of `0` for any of the four PCDs
 means the same thing).
 
+## Default font package
+
+`EFI_HII_FONT_PROTOCOL`'s system default font (the font every `OutputString()` call renders with) resolves glyphs from
+`EFI_HII_PACKAGE_SIMPLE_FONTS` package(s) registered in the HII database. `HiiDatabaseDxe` implements the protocol but
+doesn't include glyph data of its own.
+
+Since this component replaces `GraphicsConsoleDxe`, `console::font_package` ports the same registration done in the
+EDK II C driver where `console::font_data` embeds the identical glyph bitmap (printable ASCII and the box/shape
+characters the UEFI specification requires).
+
+It's registered with the HII database the first time a controller starts, so a platform only needs the HII Database
+driver in its firmware volume and is not required to carry a separate font package driver for text to render.
+
 ## Intentional deviations from `GraphicsConsoleDxe`
 
 - The initial text mode is applied immediately in `Start()` (cleared to the default colors) instead of being left for a

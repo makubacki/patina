@@ -37,11 +37,13 @@ use patina::{
     },
     error::Result,
     protocol::ProtocolInterface,
-    standard::efi::protocols::{device_path, graphics_output, hii_font},
+    standard::efi::protocols::{device_path, graphics_output, hii_database, hii_font},
     uefi::device_path::walker::DevicePathWalker,
 };
 
-use crate::console::{font::HiiFontHandle, gop::GopHandle, output::SimpleTextOutputHolder, pcd::ConsolePreferences};
+use crate::console::{
+    font::HiiFontHandle, font_package, gop::GopHandle, output::SimpleTextOutputHolder, pcd::ConsolePreferences,
+};
 
 /// The name this driver publishes through the EFI Component Name protocols.
 static DRIVER_NAME: LanguageTable =
@@ -142,6 +144,14 @@ impl DriverBinding for GraphicsConsoleDriverBinding {
             // SAFETY: as above, for `hii_font::Protocol`. HII Font is a system-wide service (not
             // opened against a controller), so it is only located, never closed in `stop()`.
             let hii_font = unsafe { HiiFontHandle::new(hii_font) };
+
+            // Note: The console still works without a font package, just without any glyphs to render until
+            // something else supplies a font package.
+            if let Ok(hii_database) = self.protocols.locate_protocol::<hii_database::Protocol>()
+                && let Err(err) = font_package::register(hii_database)
+            {
+                log::warn!("Failed to register default HII font package: {err:?}");
+            }
 
             let preferences = ConsolePreferences::read(self.pcd);
             let holder =

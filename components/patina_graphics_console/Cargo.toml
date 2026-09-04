@@ -16,6 +16,8 @@ workspace = true
 log = { workspace = true }
 mockall = { workspace = true, optional = true }
 patina = { workspace = true, features = ["alloc"] }
+zerocopy = { workspace = true }
+zerocopy-derive = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
