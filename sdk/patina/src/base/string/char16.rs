@@ -1152,6 +1152,16 @@ mod tests {
         assert!(name == "café");
     }
 
+    const CHAR16_MACRO_CONST: &Char16Str = char16!("Firmware");
+    static CHAR16_MACRO_STATIC_TABLE: [&Char16Str; 2] = [char16!("A"), char16!("B")];
+
+    #[test]
+    fn test_char16_macro_in_const_and_static_context() {
+        assert!(CHAR16_MACRO_CONST == "Firmware");
+        assert!(CHAR16_MACRO_STATIC_TABLE[0] == "A");
+        assert!(CHAR16_MACRO_STATIC_TABLE[1] == "B");
+    }
+
     #[test]
     fn test_char16_array_binary_layout() {
         assert_eq!(core::mem::size_of::<Char16Array<8>>(), 16);
