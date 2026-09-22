@@ -15,10 +15,11 @@ use patina::component::service::{
     uefi_services::config_table::{ConfigTableError, ConfigTablePtr, ConfigurationTableServices},
 };
 
-use crate::config_tables::{core_install_configuration_table, get_configuration_table};
+use crate::config_tables::{
+    CONFIG_TABLE_TYPES, core_install_configuration_table, core_install_typed_configuration_table,
+    get_configuration_table,
+};
 use crate::systemtables::SYSTEM_TABLE;
-
-use super::state::UEFI_SERVICES_STATE;
 
 /// Core implementation of [`ConfigurationTableServices`], operating on the global system table via
 /// the core's internal Rust APIs.
@@ -54,30 +55,25 @@ impl ConfigurationTableServices for CoreConfigurationTableServices {
         type_id: TypeId,
         table: ConfigTablePtr,
     ) -> Result<(), ConfigTableError> {
-        let mut types = UEFI_SERVICES_STATE.config_table_types.lock();
-        // A stale type entry (in the `BTreeMap`) can outlive its table if something removed it using
-        // `remove_table` (untyped) directly, so only reject the install if the table is still present
-        // in the actual system table.
-        if types.contains_key(&guid) && self.get_table(guid).is_some() {
-            return Err(ConfigTableError::AlreadyExists);
-        }
+        let mut st_guard = SYSTEM_TABLE.lock();
+        let st = st_guard.as_mut().ok_or(ConfigTableError::NotFound)?;
         // SAFETY: forwarding the precondition on `table` upheld by this function's own caller.
-        unsafe { self.install_table(guid, table) }?;
-        types.insert(guid, type_id);
-        Ok(())
+        core_install_typed_configuration_table(guid.into_inner(), table.as_raw(), type_id, true, st)
+            .map(|_| ())
+            .map_err(ConfigTableError::from)
     }
 
     fn get_typed_table(&self, guid: BinaryGuid, type_id: TypeId) -> Option<ConfigTablePtr> {
-        if UEFI_SERVICES_STATE.config_table_types.lock().get(&guid) != Some(&type_id) {
+        if CONFIG_TABLE_TYPES.lock().get(&guid) != Some(&type_id) {
             return None;
         }
         self.get_table(guid)
     }
 
     fn remove_typed_table(&self, guid: BinaryGuid) -> Result<(), ConfigTableError> {
-        self.remove_table(guid)?;
-        UEFI_SERVICES_STATE.config_table_types.lock().remove(&guid);
-        Ok(())
+        // Note: `core_install_configuration_table` clears any type recorded for `guid` as part of
+        // removing its entry, so the map entry cannot outlive its table.
+        self.remove_table(guid)
     }
 
     unsafe fn replace_typed_table(
@@ -86,11 +82,12 @@ impl ConfigurationTableServices for CoreConfigurationTableServices {
         type_id: TypeId,
         table: ConfigTablePtr,
     ) -> Result<(), ConfigTableError> {
-        let mut types = UEFI_SERVICES_STATE.config_table_types.lock();
+        let mut st_guard = SYSTEM_TABLE.lock();
+        let st = st_guard.as_mut().ok_or(ConfigTableError::NotFound)?;
         // SAFETY: forwarding the precondition on `table` upheld by this function's own caller.
-        unsafe { self.install_table(guid, table) }?;
-        types.insert(guid, type_id);
-        Ok(())
+        core_install_typed_configuration_table(guid.into_inner(), table.as_raw(), type_id, false, st)
+            .map(|_| ())
+            .map_err(ConfigTableError::from)
     }
 }
 
@@ -261,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn install_typed_table_self_gracefully_handles_raw_remove_table() {
+    fn install_typed_table_succeeds_after_raw_remove_table() {
         with_locked_state(|| {
             let svc = CoreConfigurationTableServices;
             let guid: BinaryGuid = BinaryGuid::from_string("1e2f3a4b-5c6d-4e7f-8a8b-9c0d1e2f3a4b");
@@ -270,12 +267,12 @@ mod tests {
 
             // SAFETY: `table` is a dummy address that is not dereferenced in this test.
             unsafe { svc.install_typed_table(guid, type_id, table) }.unwrap();
-            // Remove the real table using the untyped API, bypassing type-registry cleanup. A stale
-            // type entry for `guid` is left behind.
+            // Remove the real table using the untyped API. This also clears the recorded type for
+            // `guid`, so a stale entry is not left behind.
             svc.remove_table(guid).unwrap();
+            assert_eq!(svc.get_typed_table(guid, type_id), None);
 
-            // Re-installing under the same GUID must succeed since the table itself is gone, even
-            // though the (now stale) type entry was never cleared.
+            // Re-installing under the same GUID must succeed against this clean state.
             // SAFETY: `table` is a dummy address that is not dereferenced in this test.
             assert_eq!(unsafe { svc.install_typed_table(guid, type_id, table) }, Ok(()));
             assert_eq!(svc.get_typed_table(guid, type_id), Some(table));
@@ -313,6 +310,33 @@ mod tests {
             // SAFETY: `second_table` is a dummy address that is not dereferenced in this test.
             assert_eq!(unsafe { svc.replace_typed_table(guid, type_id, second_table) }, Ok(()));
             assert_eq!(svc.get_typed_table(guid, type_id), Some(second_table));
+        });
+    }
+
+    #[test]
+    fn get_typed_table_does_not_vouch_for_a_table_replaced_out_of_band() {
+        with_locked_state(|| {
+            let svc = CoreConfigurationTableServices;
+            let guid: BinaryGuid = BinaryGuid::from_string("4b5c6d7e-8f9a-4b0c-9d0e-2f3a4b5c6d7e");
+            let type_id = TypeId::of::<u32>();
+            let typed_table = ConfigTablePtr::from_raw(0xd000usize as *mut c_void).unwrap();
+            let replacement = 0xe000usize as *mut c_void;
+
+            // SAFETY: `typed_table` is a dummy address that is not dereferenced in this test.
+            unsafe { svc.install_typed_table(guid, type_id, typed_table) }.unwrap();
+
+            // Something bypasses `ConfigurationTableServices` and replaces the entry directly
+            // (like the install config table boot service).
+            core_install_configuration_table(
+                guid.into_inner(),
+                replacement,
+                &mut *SYSTEM_TABLE.lock().as_mut().unwrap(),
+            )
+            .unwrap();
+
+            // The stale type record must not vouch for the replacement pointer.
+            assert_eq!(svc.get_typed_table(guid, type_id), None);
+            assert_eq!(svc.get_table(guid).unwrap().as_raw(), replacement);
         });
     }
 }

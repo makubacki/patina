@@ -7,12 +7,9 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 
-use alloc::collections::btree_map::BTreeMap;
 use alloc::vec::Vec;
-use core::any::TypeId;
 use core::ffi::c_void;
 
-use patina::BinaryGuid;
 use patina::standard::efi;
 
 use crate::tpl_mutex::TplMutex;
@@ -81,9 +78,6 @@ pub(crate) struct UefiServicesState {
     pub(crate) event_notify: ActiveDispatchStack,
     /// Tracks reentrant dispatch of `CoreProtocolServices` install-notify callbacks.
     pub(crate) protocol_install_notify: ActiveDispatchStack,
-    /// Records the Rust type installed under each GUID via `ConfigurationTableServices::install_typed_table`,
-    /// so a lookup can verify a type before a caller casts the pointer.
-    pub(crate) config_table_types: TplMutex<BTreeMap<BinaryGuid, TypeId>>,
 }
 
 impl UefiServicesState {
@@ -91,7 +85,6 @@ impl UefiServicesState {
         Self {
             event_notify: ActiveDispatchStack::new(efi::TPL_HIGH_LEVEL, "ActiveNotifyContexts"),
             protocol_install_notify: ActiveDispatchStack::new(efi::TPL_HIGH_LEVEL, "ActiveInstallNotifies"),
-            config_table_types: TplMutex::new(efi::TPL_NOTIFY, BTreeMap::new(), "ConfigTableTypeLock"),
         }
     }
 }
@@ -126,14 +119,13 @@ mod tests {
     }
 
     #[test]
-    fn test_uefi_services_state_new_starts_with_empty_stacks_and_type_map() {
+    fn test_uefi_services_state_new_starts_with_empty_stacks() {
         with_locked_state(|| {
             let state = UefiServicesState::new();
             let context = core::ptr::null_mut();
 
             assert!(!state.event_notify.exit(context));
             assert!(!state.protocol_install_notify.exit(context));
-            assert!(state.config_table_types.lock().is_empty());
         });
     }
 }
