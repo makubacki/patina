@@ -21,7 +21,6 @@ log = { workspace = true }
 patina_paging = { workspace = true }
 scroll = { workspace = true, features = ["derive"] }
 spin = { workspace = true }
-corosensei = { workspace = true  }
 uuid = { workspace = true  }
 patina = { workspace = true, features = ["alloc", "core"] }
 patina_ffs = { workspace = true }
@@ -48,12 +47,21 @@ zerocopy-derive = { workspace = true }
 [target.'cfg(all(target_arch="aarch64"))'.dependencies]
 arm-gic = { workspace = true }
 
+# corosensei does not currently support aarch64-pc-windows-msvc: https://github.com/Amanieu/corosensei/issues/29.
+# Excluding it for that one host target lets patina_dxe_core still build/lint/test natively on
+# Windows-on-Arm hosts. Actual UEFI targets (x86_64-unknown-uefi, aarch64-unknown-uefi) are
+# unaffected since their target_os is "uefi", not "windows".
+[target.'cfg(not(all(target_arch = "aarch64", target_os = "windows")))'.dependencies]
+corosensei = { workspace = true }
+
 [features]
-std = ["patina/std"]
 compatibility_mode_allowed = []
-v1_resource_descriptor_support = []
+confidential_compute = []
 debugger_reload = []
+default = []
+std = ["patina/std"]
 # Enables loading images by device using the (unstable) SDK device path API.
 unstable-device-path = ["patina/unstable-device-path"]
+v1_resource_descriptor_support = []
 # All non-std features to test in CI
-ci_features = ["compatibility_mode_allowed", "v1_resource_descriptor_support", "debugger_reload", "unstable-device-path"]
+ci_features = ["compatibility_mode_allowed", "confidential_compute", "debugger_reload", "unstable-device-path", "v1_resource_descriptor_support"]

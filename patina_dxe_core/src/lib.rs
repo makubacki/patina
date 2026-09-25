@@ -100,7 +100,7 @@ mod uefi_services;
 pub use {component_dispatcher::MockComponentInfo, cpu::MockCpuInfo};
 
 pub use component_dispatcher::{Add, Component, ComponentInfo, Config, Service};
-pub use cpu::{CpuInfo, GicBases};
+pub use cpu::{CpuInfo, ExceptionContext, ExceptionContextX64, ExceptionType, GicBases, InterruptHandler};
 
 use spin::Once;
 
@@ -414,7 +414,8 @@ impl<P: PlatformInfo> Core<P> {
 
         GCD.prioritize_32_bit_memory(P::MemoryInfo::prioritize_32_bit_memory());
 
-        let mut interrupt_manager = cpu::initialize_cpu_subsystem().expect("Failed to initialize CPU subsystem!");
+        let mut interrupt_manager = cpu::initialize_cpu_subsystem(P::CpuInfo::exception_handlers())
+            .expect("Failed to initialize CPU subsystem!");
 
         // For early debugging, the "no_alloc" feature must be enabled in the debugger crate.
         // patina_debugger::initialize(&mut interrupt_manager);
