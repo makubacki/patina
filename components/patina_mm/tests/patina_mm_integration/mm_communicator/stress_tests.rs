@@ -158,6 +158,9 @@ fn test_framework_trigger_counting_basic() {
 
 /// Test MM communication stress with 1000 calls
 #[test]
+// Clippy lint is disabled since this is test code where the values never approach a point where
+// an f64 conversion would lose accuracy.
+#[allow(clippy::cast_precision_loss)]
 fn test_mm_communication_stress_thousand_calls() {
     const NUM_ITERATIONS: usize = 1000;
 
