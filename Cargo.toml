@@ -96,9 +96,6 @@ cast_possible_truncation = "allow"
 # pedantic::cast_possible_wrap - Higher priority. Temporarily allowed until each instance is reviewed. About 20
 #                                instances currently in the codebase.
 cast_possible_wrap = "allow"
-# pedantic::cast_precision_loss - Higher priority. Temporarily allowed until each instance is reviewed. About 9
-#                                 instances currently in the codebase.
-cast_precision_loss = "allow"
 # pedantic::cast_ptr_alignment - Higher priority. Temporarily allowed until each instance is reviewed.
 cast_ptr_alignment = "allow"
 # pedantic::cast_sign_loss - Higher priority. Temporarily allowed until each instance is reviewed.

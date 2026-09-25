@@ -378,9 +378,9 @@ impl CorePerformance {
     ) -> Result<(), Error> {
         let cpu_count = self.timer.cpu_count();
         let timestamp = match ticker {
-            0 => (cpu_count as f64 / self.timer.perf_frequency() as f64 * 1_000_000_000_f64) as u64,
+            0 => ticks_to_nanoseconds(cpu_count, self.timer.perf_frequency()),
             1 => 0,
-            ticker => (ticker as f64 / self.timer.perf_frequency() as f64 * 1_000_000_000_f64) as u64,
+            ticker => ticks_to_nanoseconds(ticker, self.timer.perf_frequency()),
         };
 
         // If the `perf_id` is not a known one, we create a DynamicStringEventRecord.
@@ -516,6 +516,21 @@ fn report_add_record_error(error: Error) -> Error {
             e
         }
     }
+}
+
+/// Converts a tick count to nanoseconds given the timer's frequency (in Hz).
+///
+/// Computed with `u128` integer arithmetic rather than a floating-point conversion, since a `u64`
+/// tick count can exceed the 52-bit mantissa of an `f64` and lose precision. Saturates to
+/// `u64::MAX` if `frequency_hz` is zero (frequency unknown) or if the result would overflow a `u64`.
+fn ticks_to_nanoseconds(ticks: u64, frequency_hz: u64) -> u64 {
+    const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+
+    u128::from(ticks)
+        .checked_mul(NANOSECONDS_PER_SECOND)
+        .and_then(|ticks_ns| ticks_ns.checked_div(u128::from(frequency_hz)))
+        .and_then(|ns| u64::try_from(ns).ok())
+        .unwrap_or(u64::MAX)
 }
 
 /// Resolves the firmware file GUID for the module backing the given handle.
@@ -1050,6 +1065,31 @@ mod tests {
             report_add_record_error(Error::Efi(EfiError::InvalidParameter)),
             Error::Efi(EfiError::InvalidParameter)
         );
+    }
+
+    #[test]
+    fn test_ticks_to_nanoseconds_converts_using_frequency() {
+        // 100 ticks at 100 Hz is exactly one second.
+        assert_eq!(ticks_to_nanoseconds(100, 100), 1_000_000_000);
+        assert_eq!(ticks_to_nanoseconds(0, 100), 0);
+    }
+
+    #[test]
+    fn test_ticks_to_nanoseconds_truncates_like_integer_division() {
+        // 1 tick at 3 Hz does not divide evenly.
+        assert_eq!(ticks_to_nanoseconds(1, 3), 1_000_000_000 / 3);
+    }
+
+    #[test]
+    fn test_ticks_to_nanoseconds_saturates_on_zero_frequency() {
+        assert_eq!(ticks_to_nanoseconds(0, 0), u64::MAX);
+        assert_eq!(ticks_to_nanoseconds(1, 0), u64::MAX);
+    }
+
+    #[test]
+    fn test_ticks_to_nanoseconds_saturates_on_overflow() {
+        // A large tick count at a very low frequency overflows a u64 nanosecond result.
+        assert_eq!(ticks_to_nanoseconds(u64::MAX, 1), u64::MAX);
     }
 
     #[test]
