@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - feature/**/*
+      - test_patina_qemu_pr_val_cache_token
 
 concurrency:
   group: qemu-pr-pending-${{ github.event.pull_request.number }}
