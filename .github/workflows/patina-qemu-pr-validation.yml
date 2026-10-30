@@ -134,7 +134,7 @@ jobs:
     name: Run Patina QEMU Validation
     needs: [prepare]
     if: needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true'
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@patina_qemu_pr_val_cache_token
     with:
       base-ref: ${{ needs.prepare.outputs.base_ref }}
       head-sha: ${{ github.event.workflow_run.head_sha }}
