@@ -6,6 +6,8 @@
 [![ci]][_ci]
 [![cov]][_cov]
 
+Test change
+
 This repository hosts the Patina project - a Rust implementation of UEFI firmware.
 
 The goal of this project is to serve as a replacement for core UEFI firmware components so they are written in Pure
