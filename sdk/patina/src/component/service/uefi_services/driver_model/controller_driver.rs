@@ -130,9 +130,11 @@ use crate::uefi::{
 };
 
 use super::driver_binding::DriverBinding;
-use super::handle::Handle;
-use super::protocol::{OpenAttributes, ProtocolError, ProtocolPtr, ProtocolServices, ProtocolServicesExt};
-use super::tpl::TplServices;
+use crate::component::service::uefi_services::handle::Handle;
+use crate::component::service::uefi_services::protocol::{
+    OpenAttributes, ProtocolError, ProtocolPtr, ProtocolServices, ProtocolServicesExt,
+};
+use crate::component::service::uefi_services::tpl::TplServices;
 
 /// A driver that manages controllers exposing [`Self::Protocol`].
 ///

@@ -12,7 +12,7 @@
 
 use crate::base::error::EfiError;
 
-pub use super::handle::Handle;
+pub use crate::component::service::uefi_services::handle::Handle;
 
 #[cfg(any(test, feature = "mockall"))]
 use mockall::automock;
