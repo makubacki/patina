@@ -85,7 +85,7 @@ jobs:
           base_ref=$(echo "$pr_json" | jq -r '.base.ref')
 
           # Only run QEMU validation for PRs targeting `main` or a `feature/**/*` branch.
-          if [[ "$base_ref" != "main" && "$base_ref" != feature/* ]]; then
+          if [[ "$base_ref" != "main" && "$base_ref" != feature/* && "$base_ref" != os-boot-and-test-apps-pr-validation ]]; then
             echo "::notice::PR #$pr_number targets '$base_ref', which is not a supported branch for QEMU validation. Skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "skip_reason=unsupported_target_branch" >> "$GITHUB_OUTPUT"
@@ -134,9 +134,9 @@ jobs:
     name: Run Patina QEMU Validation
     needs: [prepare]
     if: needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true'
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidation.yml@os-boot-and-test-apps-pr-validation
     with:
-      base-ref: ${{ needs.prepare.outputs.base_ref }}
+      # Removed base-ref to skip size report when testing on fork
       head-sha: ${{ github.event.workflow_run.head_sha }}
       patina-ref: ${{ github.event.workflow_run.head_sha }}
       pr-number: ${{ fromJSON(needs.prepare.outputs.pr_number) }}

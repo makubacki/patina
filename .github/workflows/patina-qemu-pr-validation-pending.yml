@@ -20,6 +20,7 @@ on:
     branches:
       - main
       - feature/**/*
+      - os-boot-and-test-apps-pr-validation
 
 concurrency:
   group: qemu-pr-pending-${{ github.event.pull_request.number }}
@@ -31,7 +32,7 @@ permissions:
 jobs:
   notify-pending:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuPrValidationPending.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuPrValidationPending.yml@os-boot-and-test-apps-pr-validation
     with:
       head-sha: ${{ github.event.pull_request.head.sha }}
       pr-number: ${{ github.event.pull_request.number }}

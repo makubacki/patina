@@ -26,4 +26,4 @@ permissions:
 jobs:
   populate-cache:
     name: Populate Patina QEMU Caches
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/PatinaQemuCachePopulation.yml@main
+    uses: makubacki/patina-devops/.github/workflows/PatinaQemuCachePopulation.yml@os-boot-and-test-apps-pr-validation

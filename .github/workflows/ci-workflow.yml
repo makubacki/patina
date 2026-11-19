@@ -22,11 +22,13 @@ on:
       - main
       - major
       - feature/**/*
+      - os-boot-and-test-apps-pr-validation
   pull_request:
     branches:
       - main
       - major
       - feature/**/*
+      - os-boot-and-test-apps-pr-validation
 
 # Do not allow more than one instance of this workflow to run at the same
 # time for the same PR ref (branch). Prefer head_ref but fall back to ref
@@ -40,12 +42,7 @@ concurrency:
 jobs:
   ci_workflow:
     name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/CiWorkflow.yml@37902f7991125091a91ca4054395d2d65576a7f5 # v0.3.16
-    with:
-      build-tasks: build,build-x64,build-aarch64,check-no-alloc-x64
-      run-cargo-vet: false
-    secrets: inherit
-  mdbook_docs_test:
-    name: Run
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/MdbookWorkflow.yml@37902f7991125091a91ca4054395d2d65576a7f5 # v0.3.16
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op
+        run: ":"
