@@ -284,17 +284,29 @@ parameter. This is independent of the ability to locate and work with protocols 
 `Protocol<P>` as an entry point parameter is a natural way to express a component dispatch dependency on a given
 protocol in cases when the fundamental initialization of a component depends on the presence of the protocol.
 
+`Protocol<P>` is only a dispatch gate. It does not provide access to the interface and does not implement `Deref`
+since the interface can be uninstalled after the component is dispatched (the deref is fallible). It can be used with
+`Service<dyn ProtocolServices>`. `locate_protocol` provides immediate access to the protocol, or `locate_token`
+can be called to obtain a reference to the protocol that is validated when it is used later.
+
 ```rust
 # extern crate patina;
-use patina::{error::Result, component::{component, protocol::Protocol}};
+use patina::{
+    error::Result,
+    component::{
+        component,
+        protocol::Protocol,
+        service::{Service, uefi_services::protocol::{ProtocolServices, ProtocolServicesExt}},
+    },
+};
 use patina::standard::efi::protocols::graphics_output::Protocol as GraphicsOutput;
 
 pub struct MyComponent;
 
 #[component]
 impl MyComponent {
-    fn entry_point(self, gop: Protocol<GraphicsOutput>) -> Result<()> {
-        let _mode = gop.mode;
+    fn entry_point(self, _gop: Protocol<GraphicsOutput>, protocols: Service<dyn ProtocolServices>) -> Result<()> {
+        let _mode = protocols.locate_protocol::<GraphicsOutput>()?.mode;
         Ok(())
     }
 }

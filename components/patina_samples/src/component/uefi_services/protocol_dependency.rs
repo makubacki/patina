@@ -1,14 +1,14 @@
 //! Protocol Dependency Sample Component
 //!
 //! `Protocol<P>` lets a component express a dispatch dependency on a specific UEFI protocol
-//! directly in its `entry_point` signature, instead of locating the protocol manually through
-//! `Service<dyn ProtocolServices>` (see [`super::protocol_consumer`]). The component is not
-//! dispatched until the protocol is installed, and dereferencing the parameter then gives direct
-//! access to the interface, with no lookup call, handle, or GUID needed at the call site.
+//! directly in its `entry_point` signature. It is used to gate dispatch. The component is not
+//! dispatched until the protocol is installed, but the parameter does not give access to the
+//! interface. The interface is located through `Service<dyn ProtocolServices>` (see
+//! [`super::protocol_consumer`] for ways to access the protocol interface).
 //!
 //! [`ProtocolDependencySample`] shows a hard protocol dependency as it does not run until the protocol
 //! is installed. [`OptionalProtocolDependencySample`] wraps the parameter in `Option` so the component
-//! runs immediately either way, reading the protocol only when it happens to already be installed.
+//! runs immediately either way, reading the protocol only when it was already installed at dispatch.
 //!
 //! Both samples consume [`SampleVendorProtocol`], published by [`super::protocol_publisher`].
 //!
@@ -22,7 +22,14 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use patina::{
-    component::{component, protocol::Protocol},
+    component::{
+        component,
+        protocol::Protocol,
+        service::{
+            Service,
+            uefi_services::protocol::{ProtocolServices, ProtocolServicesExt},
+        },
+    },
     error::Result,
 };
 
@@ -39,14 +46,18 @@ impl ProtocolDependencySample {
         Self
     }
 
-    fn entry_point(self, protocol: Protocol<SampleVendorProtocol>) -> Result<()> {
-        // `protocol` already dereferences to `SampleVendorProtocol`. The dispatcher only
-        // calls this entry point once the protocol is confirmed installed, so no lookup
-        // call, handle, or GUID is needed.
-        let status = (protocol.get_status)();
+    fn entry_point(
+        self,
+        _svp: Protocol<SampleVendorProtocol>,
+        protocols: Service<dyn ProtocolServices>,
+    ) -> Result<()> {
+        // The dispatcher only calls this entry point once the protocol is confirmed installed,
+        // but the interface is still located through the protocol service.
+        let interface = protocols.locate_protocol::<SampleVendorProtocol>()?;
+        let status = (interface.get_status)();
         log::info!(
             "Dispatched now that SampleVendorProtocol (rev {:#x}) is installed, status is {status:#x}",
-            protocol.revision
+            interface.revision
         );
         Ok(())
     }
@@ -64,12 +75,16 @@ impl OptionalProtocolDependencySample {
         Self
     }
 
-    fn entry_point(self, protocol: Option<Protocol<SampleVendorProtocol>>) -> Result<()> {
+    fn entry_point(
+        self,
+        installed: Option<Protocol<SampleVendorProtocol>>,
+        protocols: Service<dyn ProtocolServices>,
+    ) -> Result<()> {
         // Unlike `Protocol<P>` by itself, `Option<Protocol<P>>` does not block dispatch: this component
-        // runs immediately, and `protocol` is `None` until SampleVendorProtocol is installed.
-        match protocol {
-            Some(protocol) => {
-                let status = (protocol.get_status)();
+        // runs immediately, and `installed` is `None` until SampleVendorProtocol is installed.
+        match installed {
+            Some(_) => {
+                let status = (protocols.locate_protocol::<SampleVendorProtocol>()?.get_status)();
                 log::info!("SampleVendorProtocol is already installed, status is {status:#x}");
             }
             None => log::debug!("SampleVendorProtocol is not installed yet, continuing without it"),
